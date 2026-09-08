@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Clair de Lune · Visual Piano Navigation</title>
-  <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="clair-de-lune.css">
 </head>
 <body class="visual-page">
@@ -23,11 +22,24 @@
           <span>Step <strong id="step-num">1</strong>/<span id="step-total">4</span></span>
         </div>
 
-        <div class="step-btn-group" role="group" aria-label="Step navigation">
+        <div class="mode-switch" role="group" aria-label="Play mode">
+          <button type="button" class="mode-btn is-active" id="btn-timed" aria-pressed="true">Timed</button>
+          <button type="button" class="mode-btn" id="btn-practice" aria-pressed="false">Practice</button>
+        </div>
+
+        <div class="step-btn-group practice-controls" role="group" aria-label="Step navigation">
           <button type="button" class="step-btn" id="btn-prev" title="Previous event (Left Arrow or P)">Previous</button>
           <button type="button" class="step-btn" id="btn-next" title="Next event (Space, Right Arrow, or N)">Next</button>
-          <button type="button" class="step-btn" id="btn-reset" title="Start over at Bar 1">Reset</button>
         </div>
+
+        <button type="button" class="step-btn transport-btn" id="btn-play">Play</button>
+        <button type="button" class="step-btn transport-btn" id="btn-reset" title="Start over at Bar 1">Restart</button>
+        <select id="speed-select" class="midi-select speed-select" aria-label="Playback speed">
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+        </select>
 
         <div class="midi-select-wrap">
           <span class="midi-chip" id="midi-chip">MIDI…</span>
@@ -49,18 +61,22 @@
       </div>
     </section>
 
+    <section class="game-hud" aria-label="Performance">
+      <span>Score <strong id="score-value">0</strong></span>
+      <span>Combo <strong id="combo-value">0</strong></span>
+      <span>Accuracy <strong id="accuracy-value">100%</strong></span>
+      <strong class="judgment-flash" id="judgment-value" aria-live="polite">Ready</strong>
+    </section>
+
     <!-- Movement Cues (Secondary visual indicator: distance, direction, upcoming jump) -->
     <div class="movement-row" id="movement-row" aria-live="polite">
       <div class="movement-cues" id="movement-cues">
         <!-- Visual indicators per hand injected dynamically -->
       </div>
       <div class="mode-indicator">
-        <span>Wait mode · Bright region-colored keys are the ones to play</span>
+        <span id="mode-copy">Timed mode · Play notes as they cross the hit line</span>
         <button type="button" class="key-num-toggle" id="btn-key-numbers" aria-pressed="false" title="Show piano key numbers 1–88">
           Show key numbers
-        </button>
-        <button type="button" class="key-num-toggle" id="btn-center-middle-c" aria-pressed="false" title="Keep the keyboard centered on Middle C (key 40)">
-          Center on middle C
         </button>
       </div>
     </div>
@@ -75,9 +91,9 @@
             <!-- Color segments matching displayed regions -->
           </div>
 
-          <!-- Note Target Lane (vertically aligned directly over physical keys) -->
+          <!-- Note highway (vertically aligned directly over physical keys) -->
           <div class="note-lane" id="note-lane">
-            <!-- Current and upcoming note targets injected dynamically -->
+            <div class="hit-line" aria-hidden="true"></div>
           </div>
 
           <div class="local-piano" id="local-piano" role="img" aria-label="Interactive piano keyboard">
@@ -87,27 +103,11 @@
       </div>
     </main>
 
-    <!-- Tunable Experiment Parameters (Quiet, expandable panel) -->
-    <details class="experiment-panel">
-      <summary>Experiment Configuration & Tuning</summary>
-      <div class="experiment-grid">
-        <div class="experiment-field">
-          <label for="cfg-window">Local Window Keys (default 32)</label>
-          <input type="number" id="cfg-window" min="16" max="60" value="32">
-        </div>
-        <div class="experiment-field">
-          <label for="cfg-jump">Large Jump Threshold (keys, default 12)</label>
-          <input type="number" id="cfg-jump" min="6" max="24" value="12">
-        </div>
-        <div class="experiment-field">
-          <label for="cfg-horizon">Upcoming Horizon Events (default 1)</label>
-          <input type="number" id="cfg-horizon" min="1" max="3" value="1">
-        </div>
-      </div>
-    </details>
   </div>
 
   <script src="region-helpers.js"></script>
+  <script src="piece.js"></script>
+  <script src="game-engine.js"></script>
   <script src="clair-de-lune.js"></script>
 </body>
 </html>

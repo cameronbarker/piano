@@ -2,8 +2,9 @@
   "use strict";
 
   const regions = window.PianoRegions;
-  if (!regions) {
-    console.error("PianoRegions helper not loaded.");
+  const gameEngine = window.PianoGameEngine;
+  if (!regions || !gameEngine) {
+    console.error("Piano helpers not loaded.");
     return;
   }
 
@@ -11,9 +12,10 @@
   const Config = {
     windowKeys: 32,
     jumpThreshold: 12,
-    horizonEvents: 1,
     whiteKeyWidth: 36,
     blackKeyWidth: 22,
+    lookAheadMs: 4000,
+    judgmentWindows: { perfect: 50, good: 120, miss: 180 },
   };
 
   // ——— State ———
@@ -29,11 +31,16 @@
     selectedInputId: null,
     midiStatus: "idle",
     showKeyNumbers: false,
-    centerOnMiddleC: false,
+    mode: "timed",
+    timeline: null,
+    gameSession: null,
+    clock: gameEngine.createClock(),
+    animationFrame: null,
+    lastRenderedIndex: -1,
+    practiceAdvanceTimer: null,
   };
 
   const KEY_NUMBERS_STORE = "clair-de-lune.show-key-numbers";
-  const MIDDLE_C_STORE = "clair-de-lune.center-on-middle-c";
 
   // ——— DOM Elements ———
   const els = {
@@ -43,6 +50,15 @@
     btnPrev: document.getElementById("btn-prev"),
     btnNext: document.getElementById("btn-next"),
     btnReset: document.getElementById("btn-reset"),
+    btnPlay: document.getElementById("btn-play"),
+    btnTimed: document.getElementById("btn-timed"),
+    btnPractice: document.getElementById("btn-practice"),
+    speedSelect: document.getElementById("speed-select"),
+    scoreValue: document.getElementById("score-value"),
+    comboValue: document.getElementById("combo-value"),
+    accuracyValue: document.getElementById("accuracy-value"),
+    judgmentValue: document.getElementById("judgment-value"),
+    modeCopy: document.getElementById("mode-copy"),
     midiChip: document.getElementById("midi-chip"),
     midiSelect: document.getElementById("midi-select"),
     minimap: document.getElementById("minimap"),
@@ -53,10 +69,6 @@
     localStageInner: document.getElementById("local-stage-inner"),
     localPiano: document.getElementById("local-piano"),
     btnKeyNumbers: document.getElementById("btn-key-numbers"),
-    btnCenterMiddleC: document.getElementById("btn-center-middle-c"),
-    cfgWindow: document.getElementById("cfg-window"),
-    cfgJump: document.getElementById("cfg-jump"),
-    cfgHorizon: document.getElementById("cfg-horizon"),
   };
 
   // ——— Flatten piece bars into linear events ———
@@ -224,25 +236,7 @@
   }
 
   function computeLocalWindow() {
-    const cur = currentFlatEvent();
-    const nxt = upcomingFlatEvent(1);
-
-    const currentKeys = cur && !cur.isRest ? cur.allKeys : [];
-    const upcomingKeys = nxt && !nxt.isRest ? nxt.allKeys : [];
-    const neededKeys = currentKeys.concat(upcomingKeys);
-
-    let centerKey = 40;
-    if (!State.centerOnMiddleC) {
-      const focusKeys = currentKeys.length ? currentKeys : neededKeys;
-      const range = regions.getKeyRange(focusKeys);
-      if (range) {
-        centerKey = Math.round((range.min + range.max) / 2);
-      } else {
-        centerKey = Math.round((State.localWindow.startKey + State.localWindow.endKey) / 2);
-      }
-    }
-
-    return computeFilledWindow(centerKey);
+    return computeFilledWindow(40);
   }
 
   // ——— Local Keyboard & Note Lane Rendering ———
@@ -349,12 +343,10 @@
     });
     els.landmarkStrip.innerHTML = stripHtml;
 
-    // Render Note Targets in Lane
-    renderNoteLane(cur, nxt, totalWidth);
-    const focusKeys = State.centerOnMiddleC
-      ? [40]
-      : (expectedKeys.size ? expectedKeys : (nxt && !nxt.isRest ? nxt.allKeys : []));
-    centerStageOnKeys(focusKeys);
+    // Render note targets or the timed highway.
+    if (State.mode === "timed") renderTimedNoteLane(totalWidth);
+    else renderNoteLane(cur, nxt, totalWidth);
+    centerStageOnKeys([40]);
   }
 
   function centerStageOnKeys(keys) {
@@ -430,7 +422,7 @@
     });
 
     // Upcoming Notes (upper row)
-    if (nxt && !nxt.isRest && Config.horizonEvents >= 1) {
+    if (nxt && !nxt.isRest) {
       const nxtL = nxt.keysL || [];
       const nxtR = nxt.keysR || [];
 
@@ -456,6 +448,139 @@
     els.noteLane.innerHTML = html;
   }
 
+  function renderTimedNoteLane(totalWidth) {
+    if (!els.noteLane || !State.gameSession) return;
+    const now = State.clock.now();
+    const lookAhead = Config.lookAheadMs;
+    let html = '<div class="hit-line" aria-hidden="true"></div>';
+
+    State.gameSession.notes.forEach(function (note) {
+      const delta = note.timeMs - now;
+      if (delta > lookAhead || delta < -450) return;
+      const pos = State.keyPositions.get(note.key);
+      if (!pos) return;
+
+      const approach = Math.max(0, Math.min(1, delta / lookAhead));
+      const bottom = 28 + approach * 174;
+      const statusClass = note.status === "hit" ? " is-hit" : (note.status === "missed" ? " is-missed" : "");
+      const handClass = note.hand === "L" ? " is-lh" : " is-rh";
+      const handOffset = note.hand === "L" ? -5 : 5;
+      html +=
+        '<div class="note-target timed-note' + handClass + statusClass + '" ' +
+        'style="left:' + (pos.centerPx + handOffset) + "px; bottom:" + bottom + 'px;" ' +
+        'title="Key ' + note.key + " · " + (note.hand === "L" ? "Left" : "Right") + ' hand">' +
+          "<span>" + note.hand + "</span>" +
+        "</div>";
+    });
+
+    els.noteLane.style.width = totalWidth + "px";
+    els.noteLane.innerHTML = html;
+  }
+
+  function updateGameHud() {
+    const session = State.gameSession;
+    if (!session) return;
+    if (els.scoreValue) els.scoreValue.textContent = String(session.score);
+    if (els.comboValue) els.comboValue.textContent = String(session.combo);
+    if (els.accuracyValue) els.accuracyValue.textContent = gameEngine.getAccuracy(session) + "%";
+    if (els.judgmentValue) els.judgmentValue.textContent = session.lastJudgment || "Ready";
+    if (els.btnPlay) els.btnPlay.textContent = State.clock.isPlaying() ? "Pause" : "Play";
+  }
+
+  function syncTimedIndex(songTimeMs) {
+    if (!State.timeline) return false;
+    let idx = State.currentIndex;
+    while (idx < State.timeline.events.length - 1 && State.timeline.events[idx + 1].timeMs <= songTimeMs) idx++;
+    while (idx > 0 && State.timeline.events[idx].timeMs > songTimeMs) idx--;
+    const changed = idx !== State.currentIndex;
+    State.currentIndex = idx;
+    return changed;
+  }
+
+  function renderTimedFrame() {
+    if (State.mode !== "timed") return;
+    const now = State.clock.now();
+    const changed = syncTimedIndex(now);
+    gameEngine.markMisses(State.gameSession, now, Config.judgmentWindows);
+
+    if (changed || State.lastRenderedIndex !== State.currentIndex) {
+      State.lastRenderedIndex = State.currentIndex;
+      renderUI();
+    } else {
+      const width = els.localStageInner ? els.localStageInner.offsetWidth : 0;
+      renderTimedNoteLane(width);
+      updateGameHud();
+    }
+
+    if (State.clock.isPlaying() && now < State.timeline.durationMs + Config.judgmentWindows.miss) {
+      State.animationFrame = requestAnimationFrame(renderTimedFrame);
+    } else {
+      State.clock.pause();
+      State.animationFrame = null;
+      updateGameHud();
+    }
+  }
+
+  function startTimedLoop() {
+    if (State.animationFrame !== null) cancelAnimationFrame(State.animationFrame);
+    State.animationFrame = requestAnimationFrame(renderTimedFrame);
+  }
+
+  function toggleTimedPlayback() {
+    if (State.clock.isPlaying()) {
+      State.clock.pause();
+      if (State.animationFrame !== null) cancelAnimationFrame(State.animationFrame);
+      State.animationFrame = null;
+      renderUI();
+    } else {
+      State.clock.play();
+      startTimedLoop();
+      updateGameHud();
+    }
+  }
+
+  function restartTimedGame() {
+    State.clock.pause();
+    State.clock.restart();
+    gameEngine.resetSession(State.gameSession);
+    State.currentIndex = 0;
+    State.lastRenderedIndex = -1;
+    State.currentlyPressedKeys.clear();
+    renderUI();
+  }
+
+  function setMode(mode) {
+    if (mode !== "timed" && mode !== "practice") return;
+    State.clock.pause();
+    if (State.animationFrame !== null) cancelAnimationFrame(State.animationFrame);
+    State.animationFrame = null;
+    if (State.practiceAdvanceTimer !== null) clearTimeout(State.practiceAdvanceTimer);
+    State.practiceAdvanceTimer = null;
+    State.mode = mode;
+    State.currentIndex = 0;
+    State.playedKeys.clear();
+    State.currentlyPressedKeys.clear();
+    if (mode === "timed") {
+      State.clock.restart();
+      gameEngine.resetSession(State.gameSession);
+    }
+    document.body.classList.toggle("practice-mode", mode === "practice");
+    if (els.btnTimed) {
+      els.btnTimed.classList.toggle("is-active", mode === "timed");
+      els.btnTimed.setAttribute("aria-pressed", mode === "timed" ? "true" : "false");
+    }
+    if (els.btnPractice) {
+      els.btnPractice.classList.toggle("is-active", mode === "practice");
+      els.btnPractice.setAttribute("aria-pressed", mode === "practice" ? "true" : "false");
+    }
+    if (els.modeCopy) {
+      els.modeCopy.textContent = mode === "timed"
+        ? "Timed mode · Play notes as they cross the hit line"
+        : "Practice mode · Play every bright key to continue";
+    }
+    renderUI();
+  }
+
   function applyShowKeyNumbers(on) {
     State.showKeyNumbers = !!on;
     document.body.classList.toggle("show-key-numbers", State.showKeyNumbers);
@@ -478,28 +603,6 @@
     }
   }
 
-  function applyCenterOnMiddleC(on) {
-    State.centerOnMiddleC = !!on;
-    if (els.btnCenterMiddleC) {
-      els.btnCenterMiddleC.setAttribute("aria-pressed", State.centerOnMiddleC ? "true" : "false");
-      els.btnCenterMiddleC.textContent = State.centerOnMiddleC ? "Follow notes" : "Center on middle C";
-    }
-    try {
-      localStorage.setItem(MIDDLE_C_STORE, State.centerOnMiddleC ? "1" : "0");
-    } catch (err) {
-      // Ignore storage failures; the toggle still works for this session.
-    }
-    if (State.flatEvents.length) renderUI();
-  }
-
-  function loadCenterOnMiddleC() {
-    try {
-      return localStorage.getItem(MIDDLE_C_STORE) === "1";
-    } catch (err) {
-      return false;
-    }
-  }
-
   // ——— Wait Mode Progression Engine ———
   function updateHeaderInfo() {
     const cur = currentFlatEvent();
@@ -512,6 +615,10 @@
   }
 
   function advanceEvent(delta) {
+    if (State.practiceAdvanceTimer !== null) {
+      clearTimeout(State.practiceAdvanceTimer);
+      State.practiceAdvanceTimer = null;
+    }
     const nextIdx = Math.max(0, Math.min(State.flatEvents.length - 1, State.currentIndex + delta));
     if (nextIdx === State.currentIndex) return;
 
@@ -523,7 +630,8 @@
     // Auto-advance rest events after a calm pause
     const cur = currentFlatEvent();
     if (cur && cur.isRest && delta > 0) {
-      setTimeout(function () {
+      State.practiceAdvanceTimer = setTimeout(function () {
+        State.practiceAdvanceTimer = null;
         if (currentFlatEvent() === cur) advanceEvent(1);
       }, 700);
     }
@@ -531,7 +639,23 @@
 
   function handleKeyPress(key) {
     if (key < 1 || key > 88) return;
+    const repeated = State.currentlyPressedKeys.has(key);
     State.currentlyPressedKeys.add(key);
+
+    if (State.mode === "timed") {
+      if (repeated || !State.gameSession) return;
+      const result = gameEngine.judgeKeyPress(
+        State.gameSession,
+        key,
+        State.clock.now(),
+        Config.judgmentWindows
+      );
+      if (!result) State.gameSession.lastJudgment = "Early";
+      renderTimedNoteLane(els.localStageInner ? els.localStageInner.offsetWidth : 0);
+      renderKeypressHighlights();
+      updateGameHud();
+      return;
+    }
 
     const cur = currentFlatEvent();
     if (!cur) return;
@@ -549,8 +673,11 @@
 
       if (allDone) {
         renderUI();
-        setTimeout(function () {
-          advanceEvent(1);
+        if (State.practiceAdvanceTimer !== null) clearTimeout(State.practiceAdvanceTimer);
+        const completedIndex = State.currentIndex;
+        State.practiceAdvanceTimer = setTimeout(function () {
+          State.practiceAdvanceTimer = null;
+          if (State.mode === "practice" && State.currentIndex === completedIndex) advanceEvent(1);
         }, 160);
         return;
       }
@@ -585,6 +712,7 @@
     updateHeaderInfo();
     renderMinimap();
     renderLocalStage();
+    updateGameHud();
   }
 
   // ——— Web MIDI Integration ———
@@ -602,11 +730,15 @@
       if (this.currentInput) {
         this.currentInput.onmidimessage = null;
       }
+      State.currentlyPressedKeys.clear();
+      renderKeypressHighlights();
       this.currentInput = input || null;
       if (!this.currentInput) {
+        State.selectedInputId = null;
         this.setStatus("none", "No MIDI input");
         return;
       }
+      State.selectedInputId = this.currentInput.id;
       this.currentInput.onmidimessage = this.onMessage.bind(this);
       this.setStatus("ok", this.currentInput.name || "MIDI connected");
     },
@@ -658,7 +790,8 @@
         els.midiSelect.appendChild(opt);
       });
 
-      const preferred = this.preferPort(State.midiAccess.inputs);
+      const preferred = (State.selectedInputId && State.midiAccess.inputs.get(State.selectedInputId))
+        || this.preferPort(State.midiAccess.inputs);
       if (preferred) {
         els.midiSelect.value = preferred.id;
         this.bindInput(preferred);
@@ -687,10 +820,29 @@
       renderLocalStage();
     });
 
-    if (els.btnPrev) els.btnPrev.addEventListener("click", function () { advanceEvent(-1); });
-    if (els.btnNext) els.btnNext.addEventListener("click", function () { advanceEvent(1); });
+    if (els.btnPrev) els.btnPrev.addEventListener("click", function () {
+      if (State.mode === "practice") advanceEvent(-1);
+    });
+    if (els.btnNext) els.btnNext.addEventListener("click", function () {
+      if (State.mode === "practice") advanceEvent(1);
+    });
+    if (els.btnPlay) els.btnPlay.addEventListener("click", function () {
+      if (State.mode === "timed") toggleTimedPlayback();
+    });
+    if (els.btnTimed) els.btnTimed.addEventListener("click", function () { setMode("timed"); });
+    if (els.btnPractice) els.btnPractice.addEventListener("click", function () { setMode("practice"); });
+    if (els.speedSelect) {
+      els.speedSelect.addEventListener("change", function () {
+        State.clock.setSpeed(Number(els.speedSelect.value));
+        if (State.mode === "timed") renderUI();
+      });
+    }
     if (els.btnReset) {
       els.btnReset.addEventListener("click", function () {
+        if (State.mode === "timed") {
+          restartTimedGame();
+          return;
+        }
         State.currentIndex = 0;
         State.playedKeys.clear();
         renderUI();
@@ -700,7 +852,10 @@
     if (els.midiSelect) {
       els.midiSelect.addEventListener("change", function () {
         const id = els.midiSelect.value;
-        if (!State.midiAccess || !id) return;
+        if (!State.midiAccess || !id) {
+          Midi.bindInput(null);
+          return;
+        }
         const input = State.midiAccess.inputs.get(id);
         Midi.bindInput(input);
       });
@@ -711,14 +866,21 @@
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
 
-      if (e.key === " " || e.key === "ArrowRight" || e.key === "n" || e.key === "N") {
+      if (State.mode === "timed" && e.key === " ") {
+        e.preventDefault();
+        toggleTimedPlayback();
+      } else if (State.mode === "practice" && (e.key === " " || e.key === "ArrowRight" || e.key === "n" || e.key === "N")) {
         e.preventDefault();
         advanceEvent(1);
-      } else if (e.key === "ArrowLeft" || e.key === "Backspace" || e.key === "p" || e.key === "P") {
+      } else if (State.mode === "practice" && (e.key === "ArrowLeft" || e.key === "Backspace" || e.key === "p" || e.key === "P")) {
         e.preventDefault();
         advanceEvent(-1);
       } else if (e.key === "r" || e.key === "R") {
         e.preventDefault();
+        if (State.mode === "timed") {
+          restartTimedGame();
+          return;
+        }
         State.currentIndex = 0;
         State.playedKeys.clear();
         renderUI();
@@ -748,57 +910,34 @@
       });
     }
 
-    if (els.btnCenterMiddleC) {
-      els.btnCenterMiddleC.addEventListener("click", function () {
-        applyCenterOnMiddleC(!State.centerOnMiddleC);
-      });
-    }
-
-    // Tunable experiment config inputs
-    if (els.cfgWindow) {
-      els.cfgWindow.addEventListener("change", function () {
-        const v = parseInt(els.cfgWindow.value, 10);
-        if (!isNaN(v) && v >= 16 && v <= 60) {
-          Config.windowKeys = v;
-          renderUI();
-        }
-      });
-    }
-
-    if (els.cfgJump) {
-      els.cfgJump.addEventListener("change", function () {
-        const v = parseInt(els.cfgJump.value, 10);
-        if (!isNaN(v) && v >= 6 && v <= 24) {
-          Config.jumpThreshold = v;
-          renderUI();
-        }
-      });
-    }
-
-    if (els.cfgHorizon) {
-      els.cfgHorizon.addEventListener("change", function () {
-        const v = parseInt(els.cfgHorizon.value, 10);
-        if (!isNaN(v) && v >= 1 && v <= 3) {
-          Config.horizonEvents = v;
-          renderUI();
-        }
-      });
-    }
   }
 
   // ——— Initialize & Load Piece ———
-  async function init() {
+  function showFatalError(message) {
+    if (els.noteLane) {
+      els.noteLane.innerHTML = '<div class="rest-banner" role="alert">' + message + "</div>";
+    }
+    if (els.btnPlay) els.btnPlay.disabled = true;
+    if (els.btnNext) els.btnNext.disabled = true;
+  }
+
+  function init() {
     applyShowKeyNumbers(loadShowKeyNumbers());
-    applyCenterOnMiddleC(loadCenterOnMiddleC());
     setupListeners();
     Midi.connect();
 
-    const res = await fetch("piece.json");
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    State.piece = data;
-    State.flatEvents = buildFlatEvents(data);
-    renderUI();
+    try {
+      if (!window.clairDeLunePiece) throw new Error("Clair de Lune score data is missing.");
+      State.piece = window.clairDeLunePiece;
+      State.timeline = gameEngine.buildTimeline(State.piece);
+      State.gameSession = gameEngine.createSession(State.timeline);
+      State.flatEvents = buildFlatEvents(State.piece);
+      setMode("timed");
+    } catch (err) {
+      console.error(err);
+      showFatalError(err.message || "Unable to load score data.");
+      return;
+    }
     
     window.ClairDeLune = {
       State: State,
@@ -807,6 +946,9 @@
       renderUI: renderUI,
       handleKeyPress: handleKeyPress,
       handleKeyRelease: handleKeyRelease,
+      setMode: setMode,
+      toggleTimedPlayback: toggleTimedPlayback,
+      restartTimedGame: restartTimedGame,
     };
   }
 

@@ -1,6 +1,17 @@
 /* Clair de Lune Visual Navigation - Experiment V1 Styles */
 
 :root {
+  --bg: #161410;
+  --ink: #f3eee4;
+  --muted: #b4aa9a;
+  --line: #3a342c;
+  --primary: #f3eee4;
+  --primary-ink: #161410;
+  --quiet: #2a251e;
+  --focus: #f0c36a;
+  --ok: #c6e0b8;
+  --warn: #e8c48a;
+  --err: #e0a8a0;
   --reg-red: #E53935;
   --reg-orange: #FB8C00;
   --reg-yellow: #FDD835;
@@ -17,6 +28,54 @@
   --satisfied-color: #81c784;
   --wrong-color: #e57373;
 }
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+button {
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible,
+summary:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.muted { color: var(--muted); }
+
+.midi-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--quiet);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.midi-chip::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.midi-chip.is-ok { color: var(--ok); }
+.midi-chip.is-warn { color: var(--warn); }
+.midi-chip.is-err { color: var(--err); }
 
 body.visual-page {
   display: flex;
@@ -95,6 +154,41 @@ body.visual-page {
   flex-wrap: wrap;
 }
 
+.mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(42, 37, 30, 0.7);
+}
+
+.mode-btn {
+  padding: 4px 9px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.mode-btn.is-active {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+
+.step-btn-group.practice-controls {
+  display: none;
+}
+
+body.practice-mode .step-btn-group.practice-controls {
+  display: inline-flex;
+}
+
+body.practice-mode .transport-btn,
+body.practice-mode .speed-select {
+  display: none;
+}
+
 .bar-step-badge {
   display: inline-flex;
   align-items: center;
@@ -166,6 +260,39 @@ body.visual-page {
 
 .midi-select:focus-visible {
   border-color: var(--focus);
+}
+
+.speed-select {
+  width: auto;
+}
+
+.game-hud {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(12px, 3vw, 28px);
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(13, 12, 10, 0.72);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-hud strong {
+  color: var(--ink);
+}
+
+.judgment-flash {
+  min-width: 4.5rem;
+  text-align: center;
+  color: var(--focus) !important;
+}
+
+body.practice-mode .game-hud {
+  display: none;
 }
 
 /* 88-Key Region Minimap */
@@ -424,11 +551,48 @@ body.visual-page {
 /* Note Target Lane */
 .note-lane {
   position: relative;
-  height: 130px;
+  height: 240px;
   width: 100%;
   background: linear-gradient(180deg, rgba(22, 19, 15, 0.4) 0%, rgba(13, 12, 10, 0.9) 100%);
   border-bottom: 1px solid var(--line);
   overflow: hidden;
+}
+
+.hit-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  z-index: 4;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 10px rgba(240, 195, 106, 0.85);
+  pointer-events: none;
+}
+
+body.practice-mode .hit-line {
+  display: none;
+}
+
+.timed-note {
+  z-index: 5;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  will-change: bottom;
+}
+
+.timed-note.is-hit {
+  opacity: 0;
+  transform: translateX(-50%) scale(1.5);
+}
+
+.timed-note.is-missed {
+  opacity: 0.18;
+  border-color: var(--wrong-color) !important;
+  filter: grayscale(1);
+}
+
+body.practice-mode .note-lane {
+  height: 130px;
 }
 
 .note-target {
@@ -498,14 +662,6 @@ body.visual-page {
 
 .note-target.is-satisfied span {
   display: none;
-}
-
-/* Ghost landing target indicator for upcoming jumps */
-.note-ghost-line {
-  position: absolute;
-  pointer-events: none;
-  border-left: 2px dashed rgba(255, 255, 255, 0.25);
-  z-index: 2;
 }
 
 /* Local Piano Keyboard */
@@ -657,56 +813,6 @@ body.show-key-numbers .lpk-w.is-c::before {
   color: var(--muted);
   font-size: 0.88rem;
   font-weight: 600;
-}
-
-/* Tunable Experiment Panel */
-.experiment-panel {
-  margin-top: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: rgba(22, 19, 15, 0.5);
-  padding: 8px 12px;
-  font-size: 0.8rem;
-}
-
-.experiment-panel summary {
-  color: var(--muted);
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.experiment-panel summary:hover {
-  color: var(--ink);
-}
-
-.experiment-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-
-.experiment-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.experiment-field label {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.experiment-field input {
-  background: #111;
-  border: 1px solid var(--line);
-  color: var(--ink);
-  padding: 4px 6px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-family: inherit;
 }
 
 /* Reduced motion preference */
