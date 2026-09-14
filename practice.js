@@ -2,23 +2,17 @@
   "use strict";
 
   const regions = window.PianoRegions;
-  const gameEngine = window.PianoGameEngine;
-  if (!regions || !gameEngine) {
+  if (!regions) {
     console.error("Piano helpers not loaded.");
     return;
   }
 
-  // ——— Tunable Experiment Configuration ———
   const Config = {
-    windowKeys: 32,
     jumpThreshold: 12,
     whiteKeyWidth: 36,
     blackKeyWidth: 22,
-    lookAheadMs: 4000,
-    judgmentWindows: { perfect: 50, good: 120, miss: 180 },
   };
 
-  // ——— State ———
   const State = {
     piece: null,
     flatEvents: [],
@@ -26,23 +20,16 @@
     playedKeys: new Set(),
     currentlyPressedKeys: new Set(),
     localWindow: { startKey: 25, endKey: 56 },
-    keyPositions: new Map(), // keyNumber -> { leftPx, centerPx, isBlack }
+    keyPositions: new Map(),
     midiAccess: null,
     selectedInputId: null,
     midiStatus: "idle",
     showKeyNumbers: false,
-    mode: "timed",
-    timeline: null,
-    gameSession: null,
-    clock: gameEngine.createClock(),
-    animationFrame: null,
-    lastRenderedIndex: -1,
     practiceAdvanceTimer: null,
   };
 
   const KEY_NUMBERS_STORE = "clair-de-lune.show-key-numbers";
 
-  // ——— DOM Elements ———
   const els = {
     barNum: document.getElementById("bar-num"),
     stepNum: document.getElementById("step-num"),
@@ -50,15 +37,6 @@
     btnPrev: document.getElementById("btn-prev"),
     btnNext: document.getElementById("btn-next"),
     btnReset: document.getElementById("btn-reset"),
-    btnPlay: document.getElementById("btn-play"),
-    btnTimed: document.getElementById("btn-timed"),
-    btnPractice: document.getElementById("btn-practice"),
-    speedSelect: document.getElementById("speed-select"),
-    scoreValue: document.getElementById("score-value"),
-    comboValue: document.getElementById("combo-value"),
-    accuracyValue: document.getElementById("accuracy-value"),
-    judgmentValue: document.getElementById("judgment-value"),
-    modeCopy: document.getElementById("mode-copy"),
     midiChip: document.getElementById("midi-chip"),
     midiSelect: document.getElementById("midi-select"),
     minimap: document.getElementById("minimap"),
@@ -71,7 +49,6 @@
     btnKeyNumbers: document.getElementById("btn-key-numbers"),
   };
 
-  // ——— Flatten piece bars into linear events ———
   function buildFlatEvents(piece) {
     const list = [];
     (piece.bars || []).forEach(function (bar, bIdx) {
@@ -102,7 +79,6 @@
     return State.flatEvents[idx] || null;
   }
 
-  // ——— 88-Key Minimap Rendering ———
   function renderMinimap() {
     if (!els.minimap) return;
     const cur = currentFlatEvent();
@@ -116,11 +92,9 @@
     const lhActiveRegions = new Set(regions.getRegionsForKeys(curL).map(function (r) { return r.id; }));
     const rhActiveRegions = new Set(regions.getRegionsForKeys(curR).map(function (r) { return r.id; }));
 
-    // Movement evaluation per hand
     const lhMove = regions.calculateHandMovement(curL, nxtL, "L", { LARGE_JUMP: Config.jumpThreshold });
     const rhMove = regions.calculateHandMovement(curR, nxtR, "R", { LARGE_JUMP: Config.jumpThreshold });
 
-    // Destination target regions
     const targetRegionIds = new Set();
     if (lhMove.requiresJumpWarning || lhMove.crossesRegion) {
       lhMove.destinationRegions.forEach(function (r) { targetRegionIds.add(r.id); });
@@ -140,7 +114,6 @@
       if (isRh) badgesHtml += '<span class="hand-badge hand-badge-rh" title="Right hand in ' + reg.name + '">R</span>';
 
       const targetTag = isTarget ? '<span class="minimap-target-cue">DEST</span>' : "";
-
       const keysSpan = reg.id === 1 ? "1–15" : (reg.id === 7 ? "76–88" : reg.start + "–" + reg.end);
 
       html +=
@@ -155,11 +128,9 @@
     });
 
     els.minimap.innerHTML = html;
-
     renderMovementCues(lhMove, rhMove);
   }
 
-  // ——— Visual Movement Cues (Secondary reinforcement) ———
   function renderMovementCues(lhMove, rhMove) {
     if (!els.movementCues) return;
     const cues = [];
@@ -198,7 +169,6 @@
     }
   }
 
-  // ——— Compute Local Window around Active Keys or Middle C ———
   function whiteKeyWidth() {
     return window.innerWidth <= 640 ? 32 : Config.whiteKeyWidth;
   }
@@ -239,7 +209,6 @@
     return computeFilledWindow(40);
   }
 
-  // ——— Local Keyboard & Note Lane Rendering ———
   function renderLocalStage() {
     if (!els.localPiano || !els.noteLane || !els.landmarkStrip) return;
 
@@ -248,7 +217,6 @@
 
     const cur = currentFlatEvent();
     const nxt = upcomingFlatEvent(1);
-
     const expectedKeys = new Set(cur && !cur.isRest ? cur.allKeys : []);
 
     const isNarrow = window.innerWidth <= 640;
@@ -260,7 +228,6 @@
     let blacksHtml = "";
     State.keyPositions.clear();
 
-    // Landmark segments for the color strip above the keyboard
     const visibleRegions = [];
     let currentRegId = null;
     let segStartKey = null;
@@ -325,7 +292,6 @@
     els.localPiano.style.width = totalWidth + "px";
     els.localPiano.innerHTML = whitesHtml + blacksHtml;
 
-    // Landmark color strip
     let stripHtml = "";
     visibleRegions.forEach(function (seg) {
       const reg = regions.PIANO_REGIONS.find(function (r) { return r.id === seg.regionId; });
@@ -343,9 +309,7 @@
     });
     els.landmarkStrip.innerHTML = stripHtml;
 
-    // Render note targets or the timed highway.
-    if (State.mode === "timed") renderTimedNoteLane(totalWidth);
-    else renderNoteLane(cur, nxt, totalWidth);
+    renderNoteLane(cur, nxt, totalWidth);
     centerStageOnKeys([40]);
   }
 
@@ -394,8 +358,6 @@
     }
 
     let html = "";
-
-    // Current Notes (bottom row)
     const curL = cur.keysL || [];
     const curR = cur.keysR || [];
 
@@ -421,7 +383,6 @@
         "</div>";
     });
 
-    // Upcoming Notes (upper row)
     if (nxt && !nxt.isRest) {
       const nxtL = nxt.keysL || [];
       const nxtR = nxt.keysR || [];
@@ -448,139 +409,6 @@
     els.noteLane.innerHTML = html;
   }
 
-  function renderTimedNoteLane(totalWidth) {
-    if (!els.noteLane || !State.gameSession) return;
-    const now = State.clock.now();
-    const lookAhead = Config.lookAheadMs;
-    let html = '<div class="hit-line" aria-hidden="true"></div>';
-
-    State.gameSession.notes.forEach(function (note) {
-      const delta = note.timeMs - now;
-      if (delta > lookAhead || delta < -450) return;
-      const pos = State.keyPositions.get(note.key);
-      if (!pos) return;
-
-      const approach = Math.max(0, Math.min(1, delta / lookAhead));
-      const bottom = 28 + approach * 174;
-      const statusClass = note.status === "hit" ? " is-hit" : (note.status === "missed" ? " is-missed" : "");
-      const handClass = note.hand === "L" ? " is-lh" : " is-rh";
-      const handOffset = note.hand === "L" ? -5 : 5;
-      html +=
-        '<div class="note-target timed-note' + handClass + statusClass + '" ' +
-        'style="left:' + (pos.centerPx + handOffset) + "px; bottom:" + bottom + 'px;" ' +
-        'title="Key ' + note.key + " · " + (note.hand === "L" ? "Left" : "Right") + ' hand">' +
-          "<span>" + note.hand + "</span>" +
-        "</div>";
-    });
-
-    els.noteLane.style.width = totalWidth + "px";
-    els.noteLane.innerHTML = html;
-  }
-
-  function updateGameHud() {
-    const session = State.gameSession;
-    if (!session) return;
-    if (els.scoreValue) els.scoreValue.textContent = String(session.score);
-    if (els.comboValue) els.comboValue.textContent = String(session.combo);
-    if (els.accuracyValue) els.accuracyValue.textContent = gameEngine.getAccuracy(session) + "%";
-    if (els.judgmentValue) els.judgmentValue.textContent = session.lastJudgment || "Ready";
-    if (els.btnPlay) els.btnPlay.textContent = State.clock.isPlaying() ? "Pause" : "Play";
-  }
-
-  function syncTimedIndex(songTimeMs) {
-    if (!State.timeline) return false;
-    let idx = State.currentIndex;
-    while (idx < State.timeline.events.length - 1 && State.timeline.events[idx + 1].timeMs <= songTimeMs) idx++;
-    while (idx > 0 && State.timeline.events[idx].timeMs > songTimeMs) idx--;
-    const changed = idx !== State.currentIndex;
-    State.currentIndex = idx;
-    return changed;
-  }
-
-  function renderTimedFrame() {
-    if (State.mode !== "timed") return;
-    const now = State.clock.now();
-    const changed = syncTimedIndex(now);
-    gameEngine.markMisses(State.gameSession, now, Config.judgmentWindows);
-
-    if (changed || State.lastRenderedIndex !== State.currentIndex) {
-      State.lastRenderedIndex = State.currentIndex;
-      renderUI();
-    } else {
-      const width = els.localStageInner ? els.localStageInner.offsetWidth : 0;
-      renderTimedNoteLane(width);
-      updateGameHud();
-    }
-
-    if (State.clock.isPlaying() && now < State.timeline.durationMs + Config.judgmentWindows.miss) {
-      State.animationFrame = requestAnimationFrame(renderTimedFrame);
-    } else {
-      State.clock.pause();
-      State.animationFrame = null;
-      updateGameHud();
-    }
-  }
-
-  function startTimedLoop() {
-    if (State.animationFrame !== null) cancelAnimationFrame(State.animationFrame);
-    State.animationFrame = requestAnimationFrame(renderTimedFrame);
-  }
-
-  function toggleTimedPlayback() {
-    if (State.clock.isPlaying()) {
-      State.clock.pause();
-      if (State.animationFrame !== null) cancelAnimationFrame(State.animationFrame);
-      State.animationFrame = null;
-      renderUI();
-    } else {
-      State.clock.play();
-      startTimedLoop();
-      updateGameHud();
-    }
-  }
-
-  function restartTimedGame() {
-    State.clock.pause();
-    State.clock.restart();
-    gameEngine.resetSession(State.gameSession);
-    State.currentIndex = 0;
-    State.lastRenderedIndex = -1;
-    State.currentlyPressedKeys.clear();
-    renderUI();
-  }
-
-  function setMode(mode) {
-    if (mode !== "timed" && mode !== "practice") return;
-    State.clock.pause();
-    if (State.animationFrame !== null) cancelAnimationFrame(State.animationFrame);
-    State.animationFrame = null;
-    if (State.practiceAdvanceTimer !== null) clearTimeout(State.practiceAdvanceTimer);
-    State.practiceAdvanceTimer = null;
-    State.mode = mode;
-    State.currentIndex = 0;
-    State.playedKeys.clear();
-    State.currentlyPressedKeys.clear();
-    if (mode === "timed") {
-      State.clock.restart();
-      gameEngine.resetSession(State.gameSession);
-    }
-    document.body.classList.toggle("practice-mode", mode === "practice");
-    if (els.btnTimed) {
-      els.btnTimed.classList.toggle("is-active", mode === "timed");
-      els.btnTimed.setAttribute("aria-pressed", mode === "timed" ? "true" : "false");
-    }
-    if (els.btnPractice) {
-      els.btnPractice.classList.toggle("is-active", mode === "practice");
-      els.btnPractice.setAttribute("aria-pressed", mode === "practice" ? "true" : "false");
-    }
-    if (els.modeCopy) {
-      els.modeCopy.textContent = mode === "timed"
-        ? "Timed mode · Play notes as they cross the hit line"
-        : "Practice mode · Play every bright key to continue";
-    }
-    renderUI();
-  }
-
   function applyShowKeyNumbers(on) {
     State.showKeyNumbers = !!on;
     document.body.classList.toggle("show-key-numbers", State.showKeyNumbers);
@@ -603,7 +431,6 @@
     }
   }
 
-  // ——— Wait Mode Progression Engine ———
   function updateHeaderInfo() {
     const cur = currentFlatEvent();
     if (!cur) return;
@@ -612,6 +439,16 @@
     if (els.stepTotal) els.stepTotal.textContent = String(cur.totalInBar);
     if (els.btnPrev) els.btnPrev.disabled = State.currentIndex <= 0;
     if (els.btnNext) els.btnNext.disabled = State.currentIndex >= State.flatEvents.length - 1;
+  }
+
+  function restartPractice() {
+    if (State.practiceAdvanceTimer !== null) {
+      clearTimeout(State.practiceAdvanceTimer);
+      State.practiceAdvanceTimer = null;
+    }
+    State.currentIndex = 0;
+    State.playedKeys.clear();
+    renderUI();
   }
 
   function advanceEvent(delta) {
@@ -627,7 +464,6 @@
 
     renderUI();
 
-    // Auto-advance rest events after a calm pause
     const cur = currentFlatEvent();
     if (cur && cur.isRest && delta > 0) {
       State.practiceAdvanceTimer = setTimeout(function () {
@@ -639,23 +475,7 @@
 
   function handleKeyPress(key) {
     if (key < 1 || key > 88) return;
-    const repeated = State.currentlyPressedKeys.has(key);
     State.currentlyPressedKeys.add(key);
-
-    if (State.mode === "timed") {
-      if (repeated || !State.gameSession) return;
-      const result = gameEngine.judgeKeyPress(
-        State.gameSession,
-        key,
-        State.clock.now(),
-        Config.judgmentWindows
-      );
-      if (!result) State.gameSession.lastJudgment = "Early";
-      renderTimedNoteLane(els.localStageInner ? els.localStageInner.offsetWidth : 0);
-      renderKeypressHighlights();
-      updateGameHud();
-      return;
-    }
 
     const cur = currentFlatEvent();
     if (!cur) return;
@@ -665,7 +485,6 @@
     if (expectedKeys.has(key)) {
       State.playedKeys.add(key);
 
-      // Check if all expected keys for this event are satisfied
       let allDone = true;
       expectedKeys.forEach(function (k) {
         if (!State.playedKeys.has(k)) allDone = false;
@@ -677,12 +496,11 @@
         const completedIndex = State.currentIndex;
         State.practiceAdvanceTimer = setTimeout(function () {
           State.practiceAdvanceTimer = null;
-          if (State.mode === "practice" && State.currentIndex === completedIndex) advanceEvent(1);
+          if (State.currentIndex === completedIndex) advanceEvent(1);
         }, 160);
         return;
       }
     } else {
-      // Soft wrong note feedback without penalty or lost place
       const keyEl = document.querySelector('.lpk[data-key="' + key + '"]');
       if (keyEl) {
         keyEl.classList.add("is-wrong");
@@ -712,10 +530,8 @@
     updateHeaderInfo();
     renderMinimap();
     renderLocalStage();
-    updateGameHud();
   }
 
-  // ——— Web MIDI Integration ———
   const Midi = {
     preferPort: function (ports) {
       const list = Array.from(ports.values());
@@ -814,39 +630,19 @@
     },
   };
 
-  // ——— Event Listeners ———
   function setupListeners() {
     window.addEventListener("resize", function () {
       renderLocalStage();
     });
 
     if (els.btnPrev) els.btnPrev.addEventListener("click", function () {
-      if (State.mode === "practice") advanceEvent(-1);
+      advanceEvent(-1);
     });
     if (els.btnNext) els.btnNext.addEventListener("click", function () {
-      if (State.mode === "practice") advanceEvent(1);
+      advanceEvent(1);
     });
-    if (els.btnPlay) els.btnPlay.addEventListener("click", function () {
-      if (State.mode === "timed") toggleTimedPlayback();
-    });
-    if (els.btnTimed) els.btnTimed.addEventListener("click", function () { setMode("timed"); });
-    if (els.btnPractice) els.btnPractice.addEventListener("click", function () { setMode("practice"); });
-    if (els.speedSelect) {
-      els.speedSelect.addEventListener("change", function () {
-        State.clock.setSpeed(Number(els.speedSelect.value));
-        if (State.mode === "timed") renderUI();
-      });
-    }
     if (els.btnReset) {
-      els.btnReset.addEventListener("click", function () {
-        if (State.mode === "timed") {
-          restartTimedGame();
-          return;
-        }
-        State.currentIndex = 0;
-        State.playedKeys.clear();
-        renderUI();
-      });
+      els.btnReset.addEventListener("click", restartPractice);
     }
 
     if (els.midiSelect) {
@@ -861,33 +657,22 @@
       });
     }
 
-    // Keyboard navigation shortcuts
     document.addEventListener("keydown", function (e) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
 
-      if (State.mode === "timed" && e.key === " ") {
-        e.preventDefault();
-        toggleTimedPlayback();
-      } else if (State.mode === "practice" && (e.key === " " || e.key === "ArrowRight" || e.key === "n" || e.key === "N")) {
+      if (e.key === " " || e.key === "ArrowRight" || e.key === "n" || e.key === "N") {
         e.preventDefault();
         advanceEvent(1);
-      } else if (State.mode === "practice" && (e.key === "ArrowLeft" || e.key === "Backspace" || e.key === "p" || e.key === "P")) {
+      } else if (e.key === "ArrowLeft" || e.key === "Backspace" || e.key === "p" || e.key === "P") {
         e.preventDefault();
         advanceEvent(-1);
       } else if (e.key === "r" || e.key === "R") {
         e.preventDefault();
-        if (State.mode === "timed") {
-          restartTimedGame();
-          return;
-        }
-        State.currentIndex = 0;
-        State.playedKeys.clear();
-        renderUI();
+        restartPractice();
       }
     });
 
-    // On-screen piano clicks for testing without hardware
     if (els.localPiano) {
       els.localPiano.addEventListener("pointerdown", function (e) {
         const keyEl = e.target.closest(".lpk[data-key]");
@@ -909,16 +694,15 @@
         applyShowKeyNumbers(!State.showKeyNumbers);
       });
     }
-
   }
 
-  // ——— Initialize & Load Piece ———
   function showFatalError(message) {
     if (els.noteLane) {
       els.noteLane.innerHTML = '<div class="rest-banner" role="alert">' + message + "</div>";
     }
-    if (els.btnPlay) els.btnPlay.disabled = true;
+    if (els.btnPrev) els.btnPrev.disabled = true;
     if (els.btnNext) els.btnNext.disabled = true;
+    if (els.btnReset) els.btnReset.disabled = true;
   }
 
   function init() {
@@ -929,26 +713,22 @@
     try {
       if (!window.clairDeLunePiece) throw new Error("Clair de Lune score data is missing.");
       State.piece = window.clairDeLunePiece;
-      State.timeline = gameEngine.buildTimeline(State.piece);
-      State.gameSession = gameEngine.createSession(State.timeline);
       State.flatEvents = buildFlatEvents(State.piece);
-      setMode("timed");
+      renderUI();
     } catch (err) {
       console.error(err);
       showFatalError(err.message || "Unable to load score data.");
       return;
     }
-    
-    window.ClairDeLune = {
+
+    window.ClairDeLunePractice = {
       State: State,
       Config: Config,
       advanceEvent: advanceEvent,
       renderUI: renderUI,
       handleKeyPress: handleKeyPress,
       handleKeyRelease: handleKeyRelease,
-      setMode: setMode,
-      toggleTimedPlayback: toggleTimedPlayback,
-      restartTimedGame: restartTimedGame,
+      restartPractice: restartPractice,
     };
   }
 

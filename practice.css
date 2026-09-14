@@ -1,4 +1,4 @@
-/* Clair de Lune Visual Navigation - Experiment V1 Styles */
+/* Clair de Lune Practice — wait-mode visual navigation */
 
 :root {
   --bg: #161410;
@@ -45,7 +45,6 @@ button {
 }
 
 button:focus-visible,
-summary:focus-visible,
 select:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
@@ -120,20 +119,6 @@ body.visual-page {
   flex-wrap: wrap;
 }
 
-.back-link {
-  color: var(--muted);
-  text-decoration: none;
-  font-size: 0.88rem;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.back-link:hover {
-  color: var(--ink);
-}
-
 .page-title {
   margin: 0;
   font-size: 1.15rem;
@@ -152,41 +137,6 @@ body.visual-page {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-}
-
-.mode-switch {
-  display: inline-flex;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: rgba(42, 37, 30, 0.7);
-}
-
-.mode-btn {
-  padding: 4px 9px;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.mode-btn.is-active {
-  background: var(--primary);
-  color: var(--primary-ink);
-}
-
-.step-btn-group.practice-controls {
-  display: none;
-}
-
-body.practice-mode .step-btn-group.practice-controls {
-  display: inline-flex;
-}
-
-body.practice-mode .transport-btn,
-body.practice-mode .speed-select {
-  display: none;
 }
 
 .bar-step-badge {
@@ -226,6 +176,12 @@ body.practice-mode .speed-select {
   transition: background 0.15s ease;
 }
 
+.header-controls > .step-btn {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(42, 37, 30, 0.7);
+}
+
 .step-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
 }
@@ -260,39 +216,6 @@ body.practice-mode .speed-select {
 
 .midi-select:focus-visible {
   border-color: var(--focus);
-}
-
-.speed-select {
-  width: auto;
-}
-
-.game-hud {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(12px, 3vw, 28px);
-  min-height: 38px;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(13, 12, 10, 0.72);
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.game-hud strong {
-  color: var(--ink);
-}
-
-.judgment-flash {
-  min-width: 4.5rem;
-  text-align: center;
-  color: var(--focus) !important;
-}
-
-body.practice-mode .game-hud {
-  display: none;
 }
 
 /* 88-Key Region Minimap */
@@ -361,7 +284,6 @@ body.practice-mode .game-hud {
   min-height: 18px;
 }
 
-/* Hand Badges on Minimap */
 .hand-badge {
   display: inline-flex;
   align-items: center;
@@ -392,7 +314,6 @@ body.practice-mode .game-hud {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-/* Upcoming Destination Region on Minimap */
 .minimap-cell.is-target {
   box-shadow: 0 0 0 2px #ffffff, 0 0 14px rgba(255, 255, 255, 0.65);
   transform: translateY(-2px);
@@ -517,7 +438,6 @@ body.practice-mode .game-hud {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
 
-/* Local Piano Keyboard */
 .local-piano-scroll {
   position: relative;
   width: 100%;
@@ -533,7 +453,6 @@ body.practice-mode .game-hud {
   width: max-content;
 }
 
-/* Landmark color strip above local keyboard */
 .local-landmark-strip {
   position: relative;
   height: 8px;
@@ -548,51 +467,14 @@ body.practice-mode .game-hud {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
-/* Note Target Lane */
+/* Current + upcoming note targets (no timed highway) */
 .note-lane {
   position: relative;
-  height: 240px;
+  height: 130px;
   width: 100%;
   background: linear-gradient(180deg, rgba(22, 19, 15, 0.4) 0%, rgba(13, 12, 10, 0.9) 100%);
   border-bottom: 1px solid var(--line);
   overflow: hidden;
-}
-
-.hit-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 24px;
-  z-index: 4;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 10px rgba(240, 195, 106, 0.85);
-  pointer-events: none;
-}
-
-body.practice-mode .hit-line {
-  display: none;
-}
-
-.timed-note {
-  z-index: 5;
-  transition: opacity 0.12s ease, transform 0.12s ease;
-  will-change: bottom;
-}
-
-.timed-note.is-hit {
-  opacity: 0;
-  transform: translateX(-50%) scale(1.5);
-}
-
-.timed-note.is-missed {
-  opacity: 0.18;
-  border-color: var(--wrong-color) !important;
-  filter: grayscale(1);
-}
-
-body.practice-mode .note-lane {
-  height: 130px;
 }
 
 .note-target {
@@ -605,7 +487,6 @@ body.practice-mode .note-lane {
   transition: bottom 0.2s cubic-bezier(0.2, 0.8, 0.3, 1), opacity 0.2s ease, transform 0.15s ease;
 }
 
-/* Hand styling on note targets */
 .note-target.is-lh {
   width: 32px;
   height: 32px;
@@ -628,7 +509,6 @@ body.practice-mode .note-lane {
   font-weight: 800;
 }
 
-/* Target states */
 .note-target.is-current {
   bottom: 12px;
   opacity: 1;
@@ -674,7 +554,6 @@ body.practice-mode .note-lane {
   background: #080706;
 }
 
-/* White & Black keys */
 .lpk {
   position: relative;
   flex: 0 0 auto;
@@ -717,7 +596,6 @@ body.practice-mode .note-lane {
   padding-bottom: 4px;
 }
 
-/* Subtle C landmark dots to easily orient around 2-black / 3-black groups */
 .lpk-w.is-c::before {
   content: "";
   position: absolute;
@@ -759,7 +637,6 @@ body.show-key-numbers .lpk-w.is-c::before {
   background: rgba(255, 255, 255, 0.95);
 }
 
-/* Key press states (MIDI and click) */
 .lpk.is-pressed.lpk-w {
   background: #b8ded6 !important;
   color: #0b1a16;
@@ -770,7 +647,6 @@ body.show-key-numbers .lpk-w.is-c::before {
   color: #f0faf6;
 }
 
-/* Key expected state: fill with the region color so white and black keys share one signal */
 .lpk.is-expected {
   background: var(--reg-color) !important;
   color: var(--reg-ink, #fff);
@@ -788,7 +664,6 @@ body.show-key-numbers .lpk-w.is-c::before {
     0 0 0 2px var(--reg-color);
 }
 
-/* Key soft wrong feedback (non-punitive) */
 .lpk.is-wrong.lpk-w {
   background: #f8d7da !important;
 }
@@ -797,7 +672,6 @@ body.show-key-numbers .lpk-w.is-c::before {
   background: #842029 !important;
 }
 
-/* Rest indicator */
 .rest-banner {
   position: absolute;
   top: 50%;
@@ -815,7 +689,6 @@ body.show-key-numbers .lpk-w.is-c::before {
   font-weight: 600;
 }
 
-/* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   .minimap-cell,
   .note-target,
@@ -827,7 +700,6 @@ body.show-key-numbers .lpk-w.is-c::before {
   }
 }
 
-/* Mobile & Narrow viewports */
 @media (max-width: 640px) {
   .visual-wrap {
     padding: 10px;
