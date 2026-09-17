@@ -3,20 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Clair de Lune · Practice</title>
+  <title>Practice</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="visual-page">
   <div class="visual-wrap">
     <header class="visual-header">
       <div class="header-left">
-        <h1 class="page-title">Clair de lune</h1>
-        <span class="page-subtitle">Claude Debussy · Practice</span>
+        <h1 class="sr-only" id="page-title">Practice</h1>
+        <div class="piece-picker">
+          <label for="piece-select" class="piece-picker-label">Piece</label>
+          <select id="piece-select" class="piece-select" aria-label="Choose a piece to practice"></select>
+        </div>
+        <span class="page-subtitle" id="page-subtitle"></span>
       </div>
 
       <div class="header-controls">
         <div class="bar-step-badge" aria-live="polite">
-          <span>Bar <strong id="bar-num">1</strong> / 72</span>
+          <span>Bar <strong id="bar-num">1</strong> / <span id="bar-total">–</span></span>
           <span>·</span>
           <span>Step <strong id="step-num">1</strong>/<span id="step-total">4</span></span>
         </div>
@@ -42,7 +46,7 @@
         <!-- Visual indicators per hand injected dynamically -->
       </div>
       <div class="mode-indicator">
-        <span id="mode-copy">Practice mode · Play every bright key to continue</span>
+        <span id="mode-copy">Practice mode · Hold every highlighted key together to continue</span>
         <button type="button" class="key-num-toggle" id="btn-key-numbers" aria-pressed="false" title="Show piano key numbers 1–88">
           Show key numbers
         </button>
@@ -69,7 +73,6 @@
   </div>
 
   <script src="region-helpers.js"></script>
-  <script src="pieces/clair-de-lune.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

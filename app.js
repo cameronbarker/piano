@@ -13,6 +13,28 @@
     blackKeyWidth: 22,
   };
 
+  const PIECES = [
+    { id: "air_bach", src: "pieces/Air — Bach.json", label: "Air — Bach" },
+    { id: "arabesque_debussy", src: "pieces/Arabesque — Debussy.json", label: "Arabesque — Debussy" },
+    { id: "ave_maria_schubert", src: "pieces/Ave Maria — Schubert.json", label: "Ave Maria — Schubert" },
+    { id: "canon_in_d_pachelbel", src: "pieces/Canon in D — Pachelbel.json", label: "Canon in D — Pachelbel" },
+    { id: "clair_de_lune", src: "pieces/Clair de Lune — Debussy.json", label: "Clair de Lune — Debussy" },
+    { id: "dance_of_the_sugar_plum_fairy_tchaikovsky", src: "pieces/Dance of the Sugar Plum Fairy — Tchaikovsky.json", label: "Dance of the Sugar Plum Fairy — Tchaikovsky" },
+    { id: "flight_of_the_bumblebee_rimsky_korsakov", src: "pieces/Flight of the Bumblebee — Rimsky-Korsakov.json", label: "Flight of the Bumblebee — Rimsky-Korsakov" },
+    { id: "fur_elise_beethoven", src: "pieces/Für Elise — Beethoven.json", label: "Für Elise — Beethoven" },
+    { id: "gymnopedie_satie", src: "pieces/Gymnopédie — Satie.json", label: "Gymnopédie — Satie" },
+    { id: "maple_leaf_rag_scott_joplin", src: "pieces/Maple Leaf Rag — Scott Joplin.json", label: "Maple Leaf Rag — Scott Joplin" },
+    { id: "moonlight", src: "pieces/Moonlight Sonata — Beethoven.json", label: "Moonlight Sonata — Beethoven" },
+    { id: "nocturne_no_20_chopin", src: "pieces/Nocturne No. 20 — Chopin.json", label: "Nocturne No. 20 — Chopin" },
+    { id: "nocturne_op_9_chopin", src: "pieces/Nocturne Op. 9 — Chopin.json", label: "Nocturne Op. 9 — Chopin" },
+    { id: "ode_to_joy_beethoven", src: "pieces/Ode to Joy — Beethoven.json", label: "Ode to Joy — Beethoven" },
+    { id: "prelude_bach", src: "pieces/Prelude — Bach.json", label: "Prelude — Bach" },
+    { id: "the_entertainer_scott_joplin", src: "pieces/The Entertainer — Scott Joplin.json", label: "The Entertainer — Scott Joplin" },
+    { id: "toccata_and_fugue_bach", src: "pieces/Toccata and Fugue — Bach.json", label: "Toccata and Fugue — Bach" },
+    { id: "turkish_march_mozart", src: "pieces/Turkish March — Mozart.json", label: "Turkish March — Mozart" },
+    { id: "waltz_chopin", src: "pieces/Waltz – Chopin.json", label: "Waltz – Chopin" },
+  ];
+
   const State = {
     piece: null,
     flatEvents: [],
@@ -29,9 +51,15 @@
   };
 
   const KEY_NUMBERS_STORE = "clair-de-lune.show-key-numbers";
+  const SELECTED_PIECE_STORE = "piano.selected-piece";
+  const pieceCache = Object.create(null);
 
   const els = {
+    pageTitle: document.getElementById("page-title"),
+    pageSubtitle: document.getElementById("page-subtitle"),
+    pieceSelect: document.getElementById("piece-select"),
     barNum: document.getElementById("bar-num"),
+    barTotal: document.getElementById("bar-total"),
     stepNum: document.getElementById("step-num"),
     stepTotal: document.getElementById("step-total"),
     btnPrev: document.getElementById("btn-prev"),
@@ -431,6 +459,113 @@
     }
   }
 
+  function pieceMetaById(id) {
+    return PIECES.find(function (p) { return p.id === id; }) || PIECES[0];
+  }
+
+  function loadSelectedPieceId() {
+    try {
+      const saved = localStorage.getItem(SELECTED_PIECE_STORE);
+      if (saved && pieceMetaById(saved).id === saved) return saved;
+    } catch (err) {
+      // Ignore storage failures; fall back to the first catalog piece.
+    }
+    return PIECES[0].id;
+  }
+
+  function saveSelectedPieceId(id) {
+    try {
+      localStorage.setItem(SELECTED_PIECE_STORE, id);
+    } catch (err) {
+      // Ignore storage failures; the choice still applies for this session.
+    }
+  }
+
+  function loadPieceJson(src) {
+    return fetch(encodeURI(src)).then(function (response) {
+      if (!response.ok) {
+        throw new Error("Could not load " + src);
+      }
+      return response.json();
+    });
+  }
+
+  function ensurePieceLoaded(meta) {
+    if (pieceCache[meta.id]) return Promise.resolve(pieceCache[meta.id]);
+    return loadPieceJson(meta.src).then(function (piece) {
+      if (!piece) throw new Error("Score data is missing for " + meta.label + ".");
+      pieceCache[meta.id] = piece;
+      return piece;
+    });
+  }
+
+  function barCountForPiece(piece) {
+    const bars = piece && piece.bars;
+    if (!bars || !bars.length) return 0;
+    const last = bars[bars.length - 1];
+    return last && last.n ? last.n : bars.length;
+  }
+
+  function updatePieceChrome(piece) {
+    const title = (piece && piece.title) || "Practice";
+    const composer = (piece && piece.composer) || "";
+    const subtitle = (piece && piece.subtitle) || "Practice";
+    if (els.pageTitle) els.pageTitle.textContent = title;
+    if (els.pageSubtitle) {
+      els.pageSubtitle.textContent = composer ? (composer + " · " + subtitle) : subtitle;
+    }
+    if (els.barTotal) els.barTotal.textContent = String(barCountForPiece(piece));
+    document.title = title + " · Practice";
+  }
+
+  function populatePieceSelect() {
+    if (!els.pieceSelect) return;
+    els.pieceSelect.innerHTML = "";
+    PIECES.forEach(function (meta) {
+      const opt = document.createElement("option");
+      opt.value = meta.id;
+      opt.textContent = meta.label;
+      els.pieceSelect.appendChild(opt);
+    });
+  }
+
+  function applyPiece(piece) {
+    State.piece = piece;
+    window.selectedPiece = piece;
+    State.flatEvents = buildFlatEvents(piece);
+    if (els.btnPrev) els.btnPrev.disabled = false;
+    if (els.btnNext) els.btnNext.disabled = false;
+    if (els.btnReset) els.btnReset.disabled = false;
+    updatePieceChrome(piece);
+    restartPractice();
+  }
+
+  let pieceLoadSeq = 0;
+
+  function selectPiece(id) {
+    const meta = pieceMetaById(id);
+    const seq = ++pieceLoadSeq;
+    if (els.pieceSelect) {
+      els.pieceSelect.value = meta.id;
+      els.pieceSelect.disabled = true;
+    }
+    if (els.pageSubtitle) els.pageSubtitle.textContent = "Loading…";
+
+    return ensurePieceLoaded(meta).then(function (piece) {
+      if (seq !== pieceLoadSeq) return;
+      applyPiece(piece);
+      saveSelectedPieceId(meta.id);
+    }).catch(function (err) {
+      if (seq !== pieceLoadSeq) return;
+      console.error(err);
+      if (els.pageSubtitle) els.pageSubtitle.textContent = "Could not load this piece";
+      showFatalError(err.message || "Unable to load score data.");
+    }).then(function () {
+      if (seq !== pieceLoadSeq) return;
+      if (els.pieceSelect) els.pieceSelect.disabled = false;
+    });
+  }
+
   function updateHeaderInfo() {
     const cur = currentFlatEvent();
     if (!cur) return;
@@ -473,6 +608,15 @@
     }
   }
 
+  function allExpectedKeysHeld(expectedKeys) {
+    if (!expectedKeys || expectedKeys.size === 0) return false;
+    let allHeld = true;
+    expectedKeys.forEach(function (k) {
+      if (!State.currentlyPressedKeys.has(k)) allHeld = false;
+    });
+    return allHeld;
+  }
+
   function handleKeyPress(key) {
     if (key < 1 || key > 88) return;
     State.currentlyPressedKeys.add(key);
@@ -482,25 +626,21 @@
 
     const expectedKeys = new Set(cur.allKeys);
 
-    if (expectedKeys.has(key)) {
-      State.playedKeys.add(key);
-
-      let allDone = true;
+    if (expectedKeys.has(key) && allExpectedKeysHeld(expectedKeys)) {
       expectedKeys.forEach(function (k) {
-        if (!State.playedKeys.has(k)) allDone = false;
+        State.playedKeys.add(k);
       });
+      renderUI();
+      if (State.practiceAdvanceTimer !== null) clearTimeout(State.practiceAdvanceTimer);
+      const completedIndex = State.currentIndex;
+      State.practiceAdvanceTimer = setTimeout(function () {
+        State.practiceAdvanceTimer = null;
+        if (State.currentIndex === completedIndex) advanceEvent(1);
+      }, 160);
+      return;
+    }
 
-      if (allDone) {
-        renderUI();
-        if (State.practiceAdvanceTimer !== null) clearTimeout(State.practiceAdvanceTimer);
-        const completedIndex = State.currentIndex;
-        State.practiceAdvanceTimer = setTimeout(function () {
-          State.practiceAdvanceTimer = null;
-          if (State.currentIndex === completedIndex) advanceEvent(1);
-        }, 160);
-        return;
-      }
-    } else {
+    if (!expectedKeys.has(key)) {
       const keyEl = document.querySelector('.lpk[data-key="' + key + '"]');
       if (keyEl) {
         keyEl.classList.add("is-wrong");
@@ -694,6 +834,12 @@
         applyShowKeyNumbers(!State.showKeyNumbers);
       });
     }
+
+    if (els.pieceSelect) {
+      els.pieceSelect.addEventListener("change", function () {
+        selectPiece(els.pieceSelect.value);
+      });
+    }
   }
 
   function showFatalError(message) {
@@ -707,19 +853,10 @@
 
   function init() {
     applyShowKeyNumbers(loadShowKeyNumbers());
+    populatePieceSelect();
     setupListeners();
     Midi.connect();
-
-    try {
-      if (!window.clairDeLunePiece) throw new Error("Clair de Lune score data is missing.");
-      State.piece = window.clairDeLunePiece;
-      State.flatEvents = buildFlatEvents(State.piece);
-      renderUI();
-    } catch (err) {
-      console.error(err);
-      showFatalError(err.message || "Unable to load score data.");
-      return;
-    }
+    selectPiece(loadSelectedPieceId());
 
     window.ClairDeLunePractice = {
       State: State,
@@ -729,6 +866,7 @@
       handleKeyPress: handleKeyPress,
       handleKeyRelease: handleKeyRelease,
       restartPractice: restartPractice,
+      selectPiece: selectPiece,
     };
   }
 
