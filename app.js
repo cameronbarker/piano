@@ -53,6 +53,7 @@
     loopBarCount: 1,
     homePianoOnRender: true,
     lastPhraseScrollIndex: null,
+    lastPhraseScrollBar: null,
   };
 
   const KEY_NUMBERS_STORE = "clair-de-lune.show-key-numbers";
@@ -425,22 +426,57 @@
     centerStageOnKeys(keys);
   }
 
+  function phraseBarAnchorEl(barNum) {
+    if (!els.phraseScroll || barNum == null) return null;
+    const br = els.phraseScroll.querySelector('.phrase-bar-break[data-bar="' + barNum + '"]');
+    if (br) return br;
+    return els.phraseScroll.querySelector('.phrase-row[data-bar="' + barNum + '"]');
+  }
+
   function scrollPhraseNowRowIntoView() {
     if (!els.phraseScroll) return;
     if (State.lastPhraseScrollIndex === State.currentIndex) return;
-    const now = els.phraseScroll.querySelector(".phrase-row.is-now");
+
+    const cur = currentFlatEvent();
+    const barNum = cur ? cur.barNum : null;
+    const now =
+      els.phraseScroll.querySelector(".phrase-row.is-now") ||
+      phraseBarAnchorEl(barNum);
     if (!now) return;
-    const scrollRect = els.phraseScroll.getBoundingClientRect();
-    const rowRect = now.getBoundingClientRect();
-    const top = rowRect.top - scrollRect.top + els.phraseScroll.scrollTop;
-    const bottom = top + now.offsetHeight;
-    const viewTop = els.phraseScroll.scrollTop;
-    const viewBottom = viewTop + els.phraseScroll.clientHeight;
+
+    const barChanged = State.lastPhraseScrollBar !== barNum;
     State.lastPhraseScrollIndex = State.currentIndex;
-    if (top >= viewTop && bottom <= viewBottom) return;
+    State.lastPhraseScrollBar = barNum;
+
+    const scroller = els.phraseScroll;
+    const scrollRect = scroller.getBoundingClientRect();
+    const pad = 20;
+    const slack = 24;
+    const anchor = phraseBarAnchorEl(barNum) || now;
+    const offsetTop = function (el) {
+      return el.getBoundingClientRect().top - scrollRect.top + scroller.scrollTop;
+    };
+
+    const nowTop = offsetTop(now);
+    const nowBottom = nowTop + now.offsetHeight;
+    const viewTop = scroller.scrollTop;
+    const viewBottom = viewTop + scroller.clientHeight;
+    const nowClipped = nowTop < viewTop + pad || nowBottom > viewBottom - pad;
+    if (!barChanged && !nowClipped) return;
+
+    const barDesired = Math.max(0, offsetTop(anchor) - pad);
+    const keepNowVisible = Math.max(0, nowBottom - scroller.clientHeight + pad);
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const target = Math.min(maxScroll, Math.max(barDesired, keepNowVisible));
+
+    if (Math.abs(scroller.scrollTop - target) < slack) return;
+
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const target = Math.max(0, top - Math.round(els.phraseScroll.clientHeight / 3));
-    els.phraseScroll.scrollTo({ top: target, behavior: reduce ? "auto" : "smooth" });
+    scroller.scrollTo({
+      top: target,
+      left: scroller.scrollLeft,
+      behavior: reduce ? "auto" : "smooth",
+    });
   }
 
   function renderNoteLane(cur, nxt, totalWidth) {
@@ -722,10 +758,27 @@
         stateClass += " is-outside";
       }
 
-      html += '<div class="phrase-row ' + stateClass + '" data-event-index="' + row.index + '">';
+      const barNum = row.event.barNum;
+      const prev = rows[rowIndex - 1];
+      const next = rows[rowIndex + 1];
+      const nextBarNum = next ? next.event.barNum : null;
+      const isBarStart = !prev || prev.event.barNum !== barNum;
+      const isBarEnd = nextBarNum !== null && nextBarNum !== barNum;
+      if (isBarStart) stateClass += " is-bar-start";
+      if (isBarEnd) stateClass += " is-bar-end";
+
+      html +=
+        '<div class="phrase-row ' + stateClass + '" data-event-index="' + row.index + '" data-bar="' + barNum + '">';
       html += appendPhraseKeyMarks(row, rowIndex, rows, "is-lh", row.event.keysL);
       html += appendPhraseKeyMarks(row, rowIndex, rows, "is-rh", row.event.keysR);
       html += "</div>";
+
+      if (isBarEnd) {
+        html +=
+          '<div class="phrase-bar-break" role="separator" aria-label="Bar ' + nextBarNum + '" data-bar="' + nextBarNum + '">' +
+            '<span class="phrase-bar-break-label">Bar ' + nextBarNum + "</span>" +
+          "</div>";
+      }
     });
 
     els.phraseInner.innerHTML = html;
@@ -930,6 +983,7 @@
     State.loop = null;
     State.homePianoOnRender = true;
     State.lastPhraseScrollIndex = null;
+    State.lastPhraseScrollBar = null;
     renderUI();
   }
 
