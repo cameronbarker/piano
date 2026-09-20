@@ -11,6 +11,7 @@
     jumpThreshold: 12,
     whiteKeyWidth: 36,
     blackKeyWidth: 22,
+    phraseLookahead: 8,
   };
 
   const PIECES = [
@@ -48,6 +49,10 @@
     midiStatus: "idle",
     showKeyNumbers: false,
     practiceAdvanceTimer: null,
+    loop: null,
+    loopBarCount: 1,
+    homePianoOnRender: true,
+    lastPhraseScrollIndex: null,
   };
 
   const KEY_NUMBERS_STORE = "clair-de-lune.show-key-numbers";
@@ -75,7 +80,21 @@
     localStageInner: document.getElementById("local-stage-inner"),
     localPiano: document.getElementById("local-piano"),
     btnKeyNumbers: document.getElementById("btn-key-numbers"),
+    phrasePanel: document.getElementById("phrase-panel"),
+    phraseScroll: document.getElementById("phrase-scroll"),
+    phraseInner: document.getElementById("phrase-inner"),
+    phraseStatus: document.getElementById("phrase-status"),
+    btnLoopThese: document.getElementById("btn-loop-these"),
+    btnLoopAgain: document.getElementById("btn-loop-again"),
+    btnLoopClear: document.getElementById("btn-loop-clear"),
+    btnLoopMinus: document.getElementById("btn-loop-minus"),
+    btnLoopPlus: document.getElementById("btn-loop-plus"),
+    loopBarCount: document.getElementById("loop-bar-count"),
   };
+
+  let syncingPhraseScroll = false;
+  let lastPianoScrollX = 0;
+  let lastPhraseScrollX = 0;
 
   function buildFlatEvents(piece) {
     const list = [];
@@ -234,7 +253,7 @@
   }
 
   function computeLocalWindow() {
-    return computeFilledWindow(40);
+    return { startKey: 1, endKey: 88 };
   }
 
   function renderLocalStage() {
@@ -338,10 +357,9 @@
     els.landmarkStrip.innerHTML = stripHtml;
 
     renderNoteLane(cur, nxt, totalWidth);
-    centerStageOnKeys([40]);
   }
 
-  function centerStageOnKeys(keys) {
+  function centerStageOnKeys(keys, instant) {
     const scroll = els.pianoScroll;
     if (!scroll) return;
 
@@ -359,16 +377,70 @@
       if (pos.centerPx > max) max = pos.centerPx;
     });
 
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const innerWidth = els.localStageInner ? els.localStageInner.offsetWidth : 0;
-    if (!keyList.length || min === Infinity || innerWidth <= scroll.clientWidth) {
-      scroll.scrollLeft = 0;
-      return;
-    }
+    if (!keyList.length || min === Infinity) return;
 
+    const innerWidth = els.localStageInner ? els.localStageInner.offsetWidth : 0;
+    if (innerWidth <= scroll.clientWidth) return;
+
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const targetCenter = (min + max) / 2;
-    const left = Math.max(0, targetCenter - scroll.clientWidth / 2);
-    scroll.scrollTo({ left: left, behavior: reduce ? "auto" : "smooth" });
+    const left = Math.max(0, Math.min(innerWidth - scroll.clientWidth, targetCenter - scroll.clientWidth / 2));
+    if (Math.abs(scroll.scrollLeft - left) < 8) return;
+    scroll.scrollTo({ left: left, behavior: (reduce || instant) ? "auto" : "smooth" });
+  }
+
+  function keysAreInView(keys) {
+    const scroll = els.pianoScroll;
+    if (!scroll || !keys || !keys.length) return true;
+    let min = Infinity;
+    let max = -Infinity;
+    keys.forEach(function (k) {
+      const pos = State.keyPositions.get(k);
+      if (!pos) return;
+      if (pos.centerPx < min) min = pos.centerPx;
+      if (pos.centerPx > max) max = pos.centerPx;
+    });
+    if (min === Infinity) return true;
+    const pad = 48;
+    const viewLeft = scroll.scrollLeft;
+    const viewRight = viewLeft + scroll.clientWidth;
+    return min >= viewLeft + pad && max <= viewRight - pad;
+  }
+
+  function keysToFollow() {
+    const cur = currentFlatEvent();
+    if (cur && !cur.isRest && cur.allKeys.length) return cur.allKeys.slice();
+    const start = State.currentIndex;
+    const end = State.loop ? State.loop.end : State.flatEvents.length - 1;
+    for (let i = start; i <= end; i++) {
+      const ev = State.flatEvents[i];
+      if (ev && !ev.isRest && ev.allKeys.length) return ev.allKeys.slice();
+    }
+    return [40];
+  }
+
+  function bringCurrentKeysIntoView() {
+    const keys = keysToFollow();
+    if (keysAreInView(keys)) return;
+    centerStageOnKeys(keys);
+  }
+
+  function scrollPhraseNowRowIntoView() {
+    if (!els.phraseScroll) return;
+    if (State.lastPhraseScrollIndex === State.currentIndex) return;
+    const now = els.phraseScroll.querySelector(".phrase-row.is-now");
+    if (!now) return;
+    const scrollRect = els.phraseScroll.getBoundingClientRect();
+    const rowRect = now.getBoundingClientRect();
+    const top = rowRect.top - scrollRect.top + els.phraseScroll.scrollTop;
+    const bottom = top + now.offsetHeight;
+    const viewTop = els.phraseScroll.scrollTop;
+    const viewBottom = viewTop + els.phraseScroll.clientHeight;
+    State.lastPhraseScrollIndex = State.currentIndex;
+    if (top >= viewTop && bottom <= viewBottom) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const target = Math.max(0, top - Math.round(els.phraseScroll.clientHeight / 3));
+    els.phraseScroll.scrollTo({ top: target, behavior: reduce ? "auto" : "smooth" });
   }
 
   function renderNoteLane(cur, nxt, totalWidth) {
@@ -435,6 +507,269 @@
     }
 
     els.noteLane.innerHTML = html;
+  }
+
+  function eventHasKey(ev, key) {
+    if (!ev) return false;
+    return ev.keysL.indexOf(key) !== -1 || ev.keysR.indexOf(key) !== -1;
+  }
+
+  function collectLookaheadRows() {
+    const rows = [];
+    let endIndex = State.currentIndex;
+    for (let i = 0; i < State.flatEvents.length; i++) {
+      const ev = State.flatEvents[i];
+      if (ev && !ev.isRest) {
+        rows.push({ event: ev, index: i });
+      }
+      endIndex = i;
+    }
+    return { rows: rows, endIndex: endIndex };
+  }
+
+  function collectLoopRows() {
+    const rows = [];
+    if (!State.loop) return { rows: rows, endIndex: State.currentIndex };
+    for (let i = State.loop.start; i <= State.loop.end; i++) {
+      const ev = State.flatEvents[i];
+      if (ev && !ev.isRest) {
+        rows.push({ event: ev, index: i });
+      }
+    }
+    return { rows: rows, endIndex: State.loop.end };
+  }
+
+  function collectPhraseRows() {
+    return collectLookaheadRows();
+  }
+
+  function lastBarNum() {
+    if (!State.flatEvents.length) return 1;
+    return State.flatEvents[State.flatEvents.length - 1].barNum;
+  }
+
+  function currentBarNum() {
+    const cur = currentFlatEvent();
+    return cur ? cur.barNum : 1;
+  }
+
+  function loopAnchorBar() {
+    if (State.loop) {
+      const ev = State.flatEvents[State.loop.start];
+      if (ev) return ev.barNum;
+    }
+    return currentBarNum();
+  }
+
+  function maxLoopBarsFrom(startBar) {
+    return Math.max(1, lastBarNum() - startBar + 1);
+  }
+
+  function clampLoopBarCount() {
+    const max = maxLoopBarsFrom(loopAnchorBar());
+    State.loopBarCount = Math.max(1, Math.min(max, State.loopBarCount || 1));
+    return State.loopBarCount;
+  }
+
+  function firstIndexForBar(barNum) {
+    for (let i = 0; i < State.flatEvents.length; i++) {
+      if (State.flatEvents[i].barNum === barNum) return i;
+    }
+    return -1;
+  }
+
+  function lastIndexForBar(barNum) {
+    for (let i = State.flatEvents.length - 1; i >= 0; i--) {
+      if (State.flatEvents[i].barNum === barNum) return i;
+    }
+    return -1;
+  }
+
+  function barRangeForLoop(startBar, count) {
+    const endBar = Math.min(lastBarNum(), startBar + count - 1);
+    const start = firstIndexForBar(startBar);
+    const end = lastIndexForBar(endBar);
+    return {
+      start: start,
+      end: end,
+      startBar: startBar,
+      endBar: endBar,
+      count: endBar - startBar + 1,
+    };
+  }
+
+  function applyBarLoop(startBar, count) {
+    if (!State.flatEvents.length) return;
+    const range = barRangeForLoop(startBar, count);
+    if (range.start < 0 || range.end < 0) return;
+    State.loopBarCount = range.count;
+    State.loop = { start: range.start, end: range.end };
+    if (State.currentIndex < range.start || State.currentIndex > range.end) {
+      if (State.practiceAdvanceTimer !== null) {
+        clearTimeout(State.practiceAdvanceTimer);
+        State.practiceAdvanceTimer = null;
+      }
+      State.currentIndex = range.start;
+      State.playedKeys.clear();
+    }
+    renderUI();
+  }
+
+  function loopBarCountLabel(count) {
+    return count === 1 ? "1 bar" : count + " bars";
+  }
+
+  function phraseStatusText(rows) {
+    if (State.loop) {
+      const startEv = State.flatEvents[State.loop.start];
+      const endEv = State.flatEvents[State.loop.end];
+      const a = startEv ? startEv.barNum : "?";
+      const b = endEv ? endEv.barNum : "?";
+      if (a === b) return "Looping bar " + a;
+      return "Looping bars " + a + "–" + b;
+    }
+    if (!rows.length) return "No playable steps";
+    return rows.length + (rows.length === 1 ? " step" : " steps");
+  }
+
+  function updatePhraseToolbar(rows) {
+    const looping = !!State.loop;
+    const count = clampLoopBarCount();
+    const max = maxLoopBarsFrom(loopAnchorBar());
+    if (els.btnLoopAgain) els.btnLoopAgain.disabled = !looping;
+    if (els.btnLoopClear) els.btnLoopClear.disabled = !looping;
+    if (els.btnLoopThese) els.btnLoopThese.disabled = State.flatEvents.length === 0;
+    if (els.btnLoopMinus) els.btnLoopMinus.disabled = count <= 1;
+    if (els.btnLoopPlus) els.btnLoopPlus.disabled = count >= max;
+    if (els.loopBarCount) els.loopBarCount.textContent = loopBarCountLabel(count);
+    if (els.phraseStatus) els.phraseStatus.textContent = phraseStatusText(rows);
+  }
+
+  function syncPhraseScrollFromPiano() {
+    if (!els.phraseScroll || !els.pianoScroll) return;
+    if (syncingPhraseScroll) return;
+    const x = els.pianoScroll.scrollLeft;
+    lastPianoScrollX = x;
+    if (els.phraseScroll.scrollLeft === x) {
+      lastPhraseScrollX = x;
+      return;
+    }
+    syncingPhraseScroll = true;
+    els.phraseScroll.scrollLeft = x;
+    lastPhraseScrollX = els.phraseScroll.scrollLeft;
+    syncingPhraseScroll = false;
+  }
+
+  function syncPianoScrollFromPhrase() {
+    if (!els.phraseScroll || !els.pianoScroll) return;
+    if (syncingPhraseScroll) return;
+    const x = els.phraseScroll.scrollLeft;
+    if (x === lastPhraseScrollX) return;
+    lastPhraseScrollX = x;
+    syncingPhraseScroll = true;
+    els.pianoScroll.scrollLeft = x;
+    lastPianoScrollX = els.pianoScroll.scrollLeft;
+    syncingPhraseScroll = false;
+  }
+
+  function appendPhraseKeyMarks(row, rowIndex, rows, handClass, keys) {
+    const prev = rowIndex > 0 ? rows[rowIndex - 1] : null;
+    const next = rowIndex < rows.length - 1 ? rows[rowIndex + 1] : null;
+    let html = "";
+    keys.forEach(function (k) {
+      const pos = State.keyPositions.get(k);
+      if (!pos) return;
+      const inPrev = eventHasKey(prev && prev.event, k);
+      const inNext = eventHasKey(next && next.event, k);
+      if (inPrev || inNext) {
+        html += '<div class="phrase-hold ' + handClass + '" style="left:' + pos.centerPx + 'px;"></div>';
+      }
+      if (inPrev) {
+        html += '<div class="phrase-mark ' + handClass + ' is-hold" style="left:' + pos.centerPx + 'px;"></div>';
+      } else {
+        html +=
+          '<div class="phrase-mark ' + handClass + ' is-head" style="left:' + pos.centerPx + 'px;">' +
+            "<span>" + (handClass === "is-lh" ? "L" : "R") + "</span>" +
+          "</div>";
+      }
+    });
+    return html;
+  }
+
+  function renderPhrasePanel() {
+    if (!els.phraseInner) return;
+
+    const totalWidth = els.localStageInner ? els.localStageInner.offsetWidth : 0;
+    els.phraseInner.style.width = totalWidth ? totalWidth + "px" : "";
+
+    const collected = collectPhraseRows();
+    const rows = collected.rows;
+    updatePhraseToolbar(rows);
+
+    if (!rows.length) {
+      const empty = "No playable steps";
+      els.phraseInner.innerHTML = '<div class="phrase-empty">' + empty + "</div>";
+      syncPhraseScrollFromPiano();
+      return;
+    }
+
+    let html = "";
+    rows.forEach(function (row, rowIndex) {
+      let stateClass = "is-future";
+      if (row.index < State.currentIndex) stateClass = "is-past";
+      else if (row.index === State.currentIndex) stateClass = "is-now";
+      if (State.loop && (row.index < State.loop.start || row.index > State.loop.end)) {
+        stateClass += " is-outside";
+      }
+
+      html += '<div class="phrase-row ' + stateClass + '" data-event-index="' + row.index + '">';
+      html += appendPhraseKeyMarks(row, rowIndex, rows, "is-lh", row.event.keysL);
+      html += appendPhraseKeyMarks(row, rowIndex, rows, "is-rh", row.event.keysR);
+      html += "</div>";
+    });
+
+    els.phraseInner.innerHTML = html;
+    syncPhraseScrollFromPiano();
+    scrollPhraseNowRowIntoView();
+  }
+
+  function loopThese() {
+    applyBarLoop(currentBarNum(), clampLoopBarCount());
+  }
+
+  function adjustLoopBars(delta) {
+    const next = clampLoopBarCount() + delta;
+    const max = maxLoopBarsFrom(loopAnchorBar());
+    const count = Math.max(1, Math.min(max, next));
+    State.loopBarCount = count;
+    if (State.loop) {
+      applyBarLoop(loopAnchorBar(), count);
+      return;
+    }
+    updatePhraseToolbar(collectPhraseRows().rows);
+  }
+
+  function loopAgain() {
+    if (!State.loop) return;
+    if (State.practiceAdvanceTimer !== null) {
+      clearTimeout(State.practiceAdvanceTimer);
+      State.practiceAdvanceTimer = null;
+    }
+    State.currentIndex = State.loop.start;
+    State.playedKeys.clear();
+    renderUI();
+    const cur = currentFlatEvent();
+    if (cur && cur.isRest) {
+      State.practiceAdvanceTimer = setTimeout(function () {
+        State.practiceAdvanceTimer = null;
+        if (currentFlatEvent() === cur) advanceEvent(1);
+      }, 700);
+    }
+  }
+
+  function clearLoop() {
+    State.loop = null;
+    renderUI();
   }
 
   function applyShowKeyNumbers(on) {
@@ -572,8 +907,17 @@
     if (els.barNum) els.barNum.textContent = String(cur.barNum);
     if (els.stepNum) els.stepNum.textContent = String(cur.eventNum);
     if (els.stepTotal) els.stepTotal.textContent = String(cur.totalInBar);
-    if (els.btnPrev) els.btnPrev.disabled = State.currentIndex <= 0;
-    if (els.btnNext) els.btnNext.disabled = State.currentIndex >= State.flatEvents.length - 1;
+    const looping = !!State.loop;
+    if (els.btnPrev) {
+      els.btnPrev.disabled = looping
+        ? State.currentIndex <= State.loop.start
+        : State.currentIndex <= 0;
+    }
+    if (els.btnNext) {
+      els.btnNext.disabled = looping
+        ? false
+        : State.currentIndex >= State.flatEvents.length - 1;
+    }
   }
 
   function restartPractice() {
@@ -583,6 +927,9 @@
     }
     State.currentIndex = 0;
     State.playedKeys.clear();
+    State.loop = null;
+    State.homePianoOnRender = true;
+    State.lastPhraseScrollIndex = null;
     renderUI();
   }
 
@@ -591,8 +938,24 @@
       clearTimeout(State.practiceAdvanceTimer);
       State.practiceAdvanceTimer = null;
     }
-    const nextIdx = Math.max(0, Math.min(State.flatEvents.length - 1, State.currentIndex + delta));
-    if (nextIdx === State.currentIndex) return;
+
+    let nextIdx;
+    let wrapping = false;
+    if (State.loop && delta > 0) {
+      nextIdx = State.currentIndex + delta;
+      if (nextIdx > State.loop.end) {
+        nextIdx = State.loop.start;
+        wrapping = true;
+      } else {
+        nextIdx = Math.min(State.loop.end, nextIdx);
+      }
+    } else if (State.loop && delta < 0) {
+      nextIdx = Math.max(State.loop.start, State.currentIndex + delta);
+    } else {
+      nextIdx = Math.max(0, Math.min(State.flatEvents.length - 1, State.currentIndex + delta));
+    }
+
+    if (nextIdx === State.currentIndex && !wrapping) return;
 
     State.currentIndex = nextIdx;
     State.playedKeys.clear();
@@ -670,6 +1033,16 @@
     updateHeaderInfo();
     renderMinimap();
     renderLocalStage();
+    renderPhrasePanel();
+    requestAnimationFrame(function () {
+      if (State.loop) {
+        bringCurrentKeysIntoView();
+      } else if (State.homePianoOnRender) {
+        centerStageOnKeys([40], true);
+        State.homePianoOnRender = false;
+      }
+      syncPhraseScrollFromPiano();
+    });
   }
 
   const Midi = {
@@ -773,7 +1146,37 @@
   function setupListeners() {
     window.addEventListener("resize", function () {
       renderLocalStage();
+      renderPhrasePanel();
+      if (State.loop) bringCurrentKeysIntoView();
+      syncPhraseScrollFromPiano();
     });
+
+    if (els.pianoScroll) {
+      els.pianoScroll.addEventListener("scroll", syncPhraseScrollFromPiano);
+    }
+    if (els.phraseScroll) {
+      els.phraseScroll.addEventListener("scroll", syncPianoScrollFromPhrase);
+    }
+
+    if (els.btnLoopThese) {
+      els.btnLoopThese.addEventListener("click", loopThese);
+    }
+    if (els.btnLoopMinus) {
+      els.btnLoopMinus.addEventListener("click", function () {
+        adjustLoopBars(-1);
+      });
+    }
+    if (els.btnLoopPlus) {
+      els.btnLoopPlus.addEventListener("click", function () {
+        adjustLoopBars(1);
+      });
+    }
+    if (els.btnLoopAgain) {
+      els.btnLoopAgain.addEventListener("click", loopAgain);
+    }
+    if (els.btnLoopClear) {
+      els.btnLoopClear.addEventListener("click", clearLoop);
+    }
 
     if (els.btnPrev) els.btnPrev.addEventListener("click", function () {
       advanceEvent(-1);

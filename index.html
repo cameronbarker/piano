@@ -70,6 +70,23 @@
         </div>
       </div>
     </main>
+
+    <section class="phrase-panel" id="phrase-panel" aria-label="Upcoming phrase">
+      <div class="phrase-toolbar">
+        <div class="phrase-bar-stepper" role="group" aria-label="Bars to loop">
+          <button type="button" class="phrase-btn" id="btn-loop-minus" aria-label="Fewer bars">−</button>
+          <span class="phrase-bar-count" id="loop-bar-count">1 bar</span>
+          <button type="button" class="phrase-btn" id="btn-loop-plus" aria-label="More bars">+</button>
+        </div>
+        <button type="button" class="phrase-btn phrase-btn-primary" id="btn-loop-these">Loop</button>
+        <button type="button" class="phrase-btn" id="btn-loop-again" disabled>Again</button>
+        <button type="button" class="phrase-btn" id="btn-loop-clear" disabled>Clear</button>
+        <span class="phrase-status" id="phrase-status" aria-live="polite">Upcoming</span>
+      </div>
+      <div class="phrase-scroll" id="phrase-scroll">
+        <div class="phrase-inner" id="phrase-inner"></div>
+      </div>
+    </section>
   </div>
 
   <script src="region-helpers.js"></script>

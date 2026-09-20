@@ -18,6 +18,8 @@ We flip that.
 
 **One freeze-frame at a time.** A step is every left- and right-hand key that attacks together. Highlights sit on those keys. L/R markers float above them. The next attack is already ghosted so you can prepare. Progress is gated on a correct shape, not on tempo.
 
+**Upcoming as a quiet strip.** Every grip in the piece appears under the keyboard, lined up with the same keys, in the leftover window space. Keys that stay put become a column. Optionally loop one or more bars from the current bar: holding the last grip wraps to the first, and the keyboard pans so those keys stay in view. The piano is still the score; looping does not change the hold-to-advance rule.
+
 **Hands are positions and travel.** Each hand is a cluster on the keyboard. If the next cluster is far away, we warn: “6 keys →” or “Jump 12 keys.” If nothing big is coming: “Hands in position.”
 
 **Relative reading, not named theory first.** The next note is “from here, this far, this direction.” A chord is a shape from its lowest (anchor) note. Interval and chord-shape analysis already exists in `tools/score_analysis.py` so later UI can speak that language without reopening MuseScore files.
