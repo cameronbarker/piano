@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DDP-100 MIDI Diagnostic</title>
+  <style>
+    :root {
+      --bg: #111318;
+      --panel: #1b1e27;
+      --panel-2: #222632;
+      --border: #333847;
+      --text: #eceef4;
+      --muted: #9aa3b5;
+      --accent: #7aa2ff;
+      --ok: #5bd38a;
+      --warn: #e6c15a;
+      --err: #f07178;
+      --focus: #9ec1ff;
+      --local: #2a2438;
+      --local-border: #6b5ca5;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+
+    body { padding: 20px; }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.45rem;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 1.05rem;
+    }
+
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .status.idle .dot { background: var(--muted); }
+    .status.pending .dot { background: var(--warn); }
+    .status.ok .dot { background: var(--ok); }
+    .status.warn .dot { background: var(--warn); }
+    .status.err .dot { background: var(--err); }
+
+    label { display: block; font-weight: 600; margin-bottom: 4px; }
+
+    select, input[type="number"] {
+      width: 100%;
+      max-width: 420px;
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    button {
+      background: var(--accent);
+      color: #0b1220;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    button:focus-visible,
+    select:focus-visible,
+    input:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .local-card {
+      background: var(--local);
+      border: 2px solid var(--local-border);
+    }
+
+    .local-card ol {
+      margin: 8px 0 0;
+      padding-left: 22px;
+    }
+
+    .result {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #1a1f18;
+      border: 1px solid #35543c;
+    }
+
+    .logs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    pre {
+      margin: 0;
+      min-height: 280px;
+      max-height: 420px;
+      overflow: auto;
+      background: #0d1016;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .howto {
+      font-size: 0.95rem;
+    }
+
+    .howto code {
+      background: var(--panel-2);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 760px) {
+      .grid-2, .logs { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="panel">
+      <h1>Donner DDP-100 MIDI Diagnostic</h1>
+      <p class="muted">This page tests what MIDI the piano actually sends and whether Local Control can be turned off. Do not assume CC 122 works until the experiment says so.</p>
+      <p class="howto muted">Serve from localhost, not as a file. In this folder run <code>python3 -m http.server 8000</code>, then open <code>http://localhost:8000/midi-diagnostic.html</code>. Use Chrome or Edge. Web MIDI will not work from a file:// URL.</p>
+    </header>
+
+    <section class="panel" aria-labelledby="connect-heading">
+      <h2 id="connect-heading">1. Connect MIDI</h2>
+      <div class="row">
+        <button type="button" id="btn-connect">Connect MIDI</button>
+        <div class="status idle" id="status"><span class="dot"></span><span id="status-text">Not connected</span></div>
+      </div>
+      <p class="muted" id="connect-hint">This is the first step. After connecting, pick the DDP-100 as both input and output.</p>
+      <div class="grid-2" style="margin-top:12px">
+        <div>
+          <label for="midi-in">MIDI input</label>
+          <select id="midi-in" disabled>
+            <option value="">No MIDI input</option>
+          </select>
+        </div>
+        <div>
+          <label for="midi-out">MIDI output</label>
+          <select id="midi-out" disabled>
+            <option value="">No MIDI output</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel local-card" aria-labelledby="local-heading">
+      <h2 id="local-heading">Local Control Test</h2>
+      <p class="muted">Follow these steps in order. The piano may ignore Local Control. Speaker behavior plus the logs are the evidence.</p>
+      <ol>
+        <li>Connect the DDP-100 as both MIDI input and MIDI output.</li>
+        <li>Press <strong>Play Middle C</strong> and verify the piano speakers play Middle C.</li>
+        <li>Press <strong>Local Control OFF</strong>.</li>
+        <li>Physically press piano keys.</li>
+        <li>Check whether MIDI Note On/Off still appear in MIDI IN, but the piano speakers stay silent.</li>
+        <li>Press <strong>Play Middle C</strong> again and check whether the browser can still make the piano speakers play.</li>
+      </ol>
+      <div class="result" id="filter-possible">
+        <strong>If E and F both work:</strong> MIDI IN still shows physical keys, those keys stay silent, and Play Middle C still sounds. Browser-controlled note filtering is possible.
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="out-heading">
+      <h2 id="out-heading">2. MIDI output tests</h2>
+      <p class="muted">These send standard MIDI. They are disabled until an output device is selected. No SysEx is sent.</p>
+      <div class="row">
+        <button type="button" class="secondary" id="btn-middle-c" disabled>Play Middle C</button>
+        <button type="button" class="secondary" id="btn-local-off" disabled>Local Control OFF</button>
+        <button type="button" class="secondary" id="btn-local-on" disabled>Local Control ON</button>
+        <button type="button" class="secondary" id="btn-all-off" disabled>All Notes Off</button>
+        <button type="button" class="secondary" id="btn-sustain-on" disabled>Sustain ON</button>
+        <button type="button" class="secondary" id="btn-sustain-off" disabled>Sustain OFF</button>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="play-heading">
+      <h2 id="play-heading">3. Play a piece through the piano</h2>
+      <p class="muted">This walks the selected piece in time and sends its notes to the DDP-100, the same way Play Middle C does. Tempo and durations come from the piece JSON. Connect MIDI output first.</p>
+      <div>
+        <label for="piece-select">Piece</label>
+        <select id="piece-select"></select>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button type="button" id="btn-play-piece" disabled>Play piece</button>
+        <button type="button" class="secondary" id="btn-stop-piece" disabled>Stop</button>
+        <span class="muted" id="play-status" aria-live="polite">Stopped</span>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="filter-heading">
+      <h2 id="filter-heading">4. Filter Mode (optional)</h2>
+      <p class="muted">When enabled, physical keys are received but not blindly echoed. Only the allowed note is sent back. Sustain (CC 64) is still forwarded. Other notes stay silent if Local Control is actually off.</p>
+      <div class="row">
+        <button type="button" class="secondary" id="btn-filter" aria-pressed="false">Enable Filter Mode</button>
+        <div>
+          <label for="allowed-note">Allowed MIDI note</label>
+          <input id="allowed-note" type="number" min="0" max="127" value="60">
+        </div>
+        <span class="muted" id="allowed-note-name">C4</span>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="logs-heading">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="logs-heading" style="margin:0">5. MIDI logs</h2>
+        <button type="button" class="secondary" id="btn-clear">Clear Logs</button>
+      </div>
+      <p class="muted">Copy these logs back for analysis. Every received and sent message is decoded with original hex bytes.</p>
+      <div class="logs">
+        <div>
+          <label>MIDI IN</label>
+          <pre id="log-in">Waiting for MIDI input…</pre>
+        </div>
+        <div>
+          <label>MIDI OUT</label>
+          <pre id="log-out">Waiting for MIDI output…</pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+      const CC_NAMES = {
+        64: "Sustain",
+        66: "Sostenuto",
+        67: "Soft",
+        122: "Local Control",
+        123: "All Notes Off"
+      };
+      const PIECES = [
+        { id: "air_bach", src: "pieces/Air — Bach.json", label: "Air — Bach" },
+        { id: "arabesque_debussy", src: "pieces/Arabesque — Debussy.json", label: "Arabesque — Debussy" },
+        { id: "ave_maria_schubert", src: "pieces/Ave Maria — Schubert.json", label: "Ave Maria — Schubert" },
+        { id: "canon_in_d_pachelbel", src: "pieces/Canon in D — Pachelbel.json", label: "Canon in D — Pachelbel" },
+        { id: "clair_de_lune", src: "pieces/Clair de Lune — Debussy.json", label: "Clair de Lune — Debussy" },
+        { id: "dance_of_the_sugar_plum_fairy_tchaikovsky", src: "pieces/Dance of the Sugar Plum Fairy — Tchaikovsky.json", label: "Dance of the Sugar Plum Fairy — Tchaikovsky" },
+        { id: "flight_of_the_bumblebee_rimsky_korsakov", src: "pieces/Flight of the Bumblebee — Rimsky-Korsakov.json", label: "Flight of the Bumblebee — Rimsky-Korsakov" },
+        { id: "fur_elise_beethoven", src: "pieces/Für Elise — Beethoven.json", label: "Für Elise — Beethoven" },
+        { id: "gymnopedie_satie", src: "pieces/Gymnopédie — Satie.json", label: "Gymnopédie — Satie" },
+        { id: "maple_leaf_rag_scott_joplin", src: "pieces/Maple Leaf Rag — Scott Joplin.json", label: "Maple Leaf Rag — Scott Joplin" },
+        { id: "moonlight", src: "pieces/Moonlight Sonata — Beethoven.json", label: "Moonlight Sonata — Beethoven" },
+        { id: "nocturne_no_20_chopin", src: "pieces/Nocturne No. 20 — Chopin.json", label: "Nocturne No. 20 — Chopin" },
+        { id: "nocturne_op_9_chopin", src: "pieces/Nocturne Op. 9 — Chopin.json", label: "Nocturne Op. 9 — Chopin" },
+        { id: "ode_to_joy_beethoven", src: "pieces/Ode to Joy — Beethoven.json", label: "Ode to Joy — Beethoven" },
+        { id: "prelude_bach", src: "pieces/Prelude — Bach.json", label: "Prelude — Bach" },
+        { id: "the_entertainer_scott_joplin", src: "pieces/The Entertainer — Scott Joplin.json", label: "The Entertainer — Scott Joplin" },
+        { id: "toccata_and_fugue_bach", src: "pieces/Toccata and Fugue — Bach.json", label: "Toccata and Fugue — Bach" },
+        { id: "turkish_march_mozart", src: "pieces/Turkish March — Mozart.json", label: "Turkish March — Mozart" },
+        { id: "waltz_chopin", src: "pieces/Waltz – Chopin.json", label: "Waltz – Chopin" }
+      ];
+      const pieceCache = Object.create(null);
+
+      const state = {
+        access: null,
+        input: null,
+        output: null,
+        filterMode: false,
+        forwardedNotes: new Set(),
+        inLines: [],
+        outLines: [],
+        playback: {
+          playing: false,
+          events: [],
+          index: 0,
+          startAt: 0,
+          raf: 0,
+          label: "",
+          sounding: new Map(),
+          lastBar: 0,
+          loading: false
+        }
+      };
+
+      const els = {
+        connect: document.getElementById("btn-connect"),
+        status: document.getElementById("status"),
+        statusText: document.getElementById("status-text"),
+        midiIn: document.getElementById("midi-in"),
+        midiOut: document.getElementById("midi-out"),
+        middleC: document.getElementById("btn-middle-c"),
+        localOff: document.getElementById("btn-local-off"),
+        localOn: document.getElementById("btn-local-on"),
+        allOff: document.getElementById("btn-all-off"),
+        sustainOn: document.getElementById("btn-sustain-on"),
+        sustainOff: document.getElementById("btn-sustain-off"),
+        filter: document.getElementById("btn-filter"),
+        allowedNote: document.getElementById("allowed-note"),
+        allowedNoteName: document.getElementById("allowed-note-name"),
+        pieceSelect: document.getElementById("piece-select"),
+        playPiece: document.getElementById("btn-play-piece"),
+        stopPiece: document.getElementById("btn-stop-piece"),
+        playStatus: document.getElementById("play-status"),
+        clear: document.getElementById("btn-clear"),
+        logIn: document.getElementById("log-in"),
+        logOut: document.getElementById("log-out")
+      };
+
+      function pad2(n) {
+        return String(n).padStart(2, "0");
+      }
+
+      function timestamp() {
+        const d = new Date();
+        return pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds()) +
+          "." + String(d.getMilliseconds()).padStart(3, "0");
+      }
+
+      function toHex(bytes) {
+        return Array.from(bytes).map(function (b) {
+          return b.toString(16).toUpperCase().padStart(2, "0");
+        }).join(" ");
+      }
+
+      function noteName(note) {
+        if (note < 0 || note > 127) return "?";
+        const name = NOTE_NAMES[note % 12];
+        const octave = Math.floor(note / 12) - 1;
+        return name + octave;
+      }
+
+      function setStatus(kind, text) {
+        els.status.className = "status " + kind;
+        els.statusText.textContent = text;
+      }
+
+      function outputButtons() {
+        return [els.middleC, els.localOff, els.localOn, els.allOff, els.sustainOn, els.sustainOff];
+      }
+
+      function setOutputEnabled(enabled) {
+        outputButtons().forEach(function (btn) {
+          btn.disabled = !enabled;
+        });
+        updatePlaybackButtons();
+      }
+
+      function updatePlaybackButtons() {
+        const playing = state.playback.playing;
+        els.playPiece.disabled = !state.output || playing;
+        els.stopPiece.disabled = !playing;
+      }
+
+      function setPlayStatus(text) {
+        els.playStatus.textContent = text;
+      }
+
+      function fillSelect(select, ports, emptyLabel) {
+        const current = select.value;
+        select.innerHTML = "";
+        const list = Array.from(ports.values());
+        if (!list.length) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = emptyLabel;
+          select.appendChild(opt);
+          return;
+        }
+        list.forEach(function (port) {
+          const opt = document.createElement("option");
+          opt.value = port.id;
+          opt.textContent = port.name || port.id;
+          select.appendChild(opt);
+        });
+        if (current && ports.get(current)) select.value = current;
+      }
+
+      function preferPort(ports) {
+        const list = Array.from(ports.values());
+        if (!list.length) return null;
+        const named = list.find(function (p) {
+          return /donner|ddp|piano|keyboard|keys|digital/i.test(p.name || "");
+        });
+        return named || list[0];
+      }
+
+      function updateConnectionLabel() {
+        const inName = state.input ? (state.input.name || state.input.id) : "none";
+        const outName = state.output ? (state.output.name || state.output.id) : "none";
+        if (!state.access) return;
+        if (state.input && state.output) {
+          setStatus("ok", "Connected · in: " + inName + " · out: " + outName);
+        } else if (state.input || state.output) {
+          setStatus("warn", "Partial · in: " + inName + " · out: " + outName);
+        } else {
+          setStatus("warn", "MIDI access granted, no devices selected");
+        }
+      }
+
+      function bindInput(input) {
+        if (state.input) state.input.onmidimessage = null;
+        state.input = input || null;
+        if (state.input) state.input.onmidimessage = onIncoming;
+        updateConnectionLabel();
+      }
+
+      function bindOutput(output) {
+        const next = output || null;
+        if (state.playback.playing && (!next || (state.output && next.id !== state.output.id))) {
+          stopPiecePlayback("stopped");
+        }
+        state.output = next;
+        setOutputEnabled(!!state.output);
+        updateConnectionLabel();
+      }
+
+      function refreshDevices() {
+        if (!state.access) return;
+        fillSelect(els.midiIn, state.access.inputs, "No MIDI input");
+        fillSelect(els.midiOut, state.access.outputs, "No MIDI output");
+        els.midiIn.disabled = false;
+        els.midiOut.disabled = false;
+
+        const inPref = (els.midiIn.value && state.access.inputs.get(els.midiIn.value))
+          || preferPort(state.access.inputs);
+        const outPref = (els.midiOut.value && state.access.outputs.get(els.midiOut.value))
+          || preferPort(state.access.outputs);
+
+        if (inPref) {
+          els.midiIn.value = inPref.id;
+          bindInput(inPref);
+        } else {
+          bindInput(null);
+        }
+
+        if (outPref) {
+          els.midiOut.value = outPref.id;
+          bindOutput(outPref);
+        } else {
+          bindOutput(null);
+        }
+      }
+
+      function decode(bytes) {
+        if (!bytes || !bytes.length) return "Empty MIDI message";
+        const status = bytes[0];
+        const type = status & 0xF0;
+        const channel = (status & 0x0F) + 1;
+        const d1 = bytes.length > 1 ? bytes[1] : 0;
+        const d2 = bytes.length > 2 ? bytes[2] : 0;
+
+        if (type === 0x80) {
+          return "Note Off  note=" + d1 + " (" + noteName(d1) + ")  velocity=" + d2 + "  channel=" + channel;
+        }
+        if (type === 0x90) {
+          if (d2 === 0) {
+            return "Note Off  note=" + d1 + " (" + noteName(d1) + ")  velocity=0  channel=" + channel + "  [Note On with velocity 0]";
+          }
+          return "Note On  note=" + d1 + " (" + noteName(d1) + ")  velocity=" + d2 + "  channel=" + channel;
+        }
+        if (type === 0xB0) {
+          const name = CC_NAMES[d1] ? " (" + CC_NAMES[d1] + ")" : "";
+          return "Control Change  CC=" + d1 + name + "  value=" + d2 + "  channel=" + channel;
+        }
+        if (type === 0xC0) {
+          return "Program Change  program=" + d1 + "  channel=" + channel;
+        }
+        if (type === 0xE0) {
+          const bend = (d2 << 7) | d1;
+          const signed = bend - 8192;
+          return "Pitch Bend  value=" + bend + "  signed=" + signed + "  channel=" + channel;
+        }
+        return "Unrecognized status=" + status + "  channel=" + channel;
+      }
+
+      function logLine(target, bytes, extra) {
+        const line = timestamp() + "  [" + toHex(bytes) + "]  " + decode(bytes) + (extra ? "  " + extra : "");
+        const arr = target === "in" ? state.inLines : state.outLines;
+        const pre = target === "in" ? els.logIn : els.logOut;
+        arr.push(line);
+        pre.textContent = arr.join("\n");
+        pre.scrollTop = pre.scrollHeight;
+      }
+
+      function logText(target, text) {
+        const line = timestamp() + "  " + text;
+        const arr = target === "in" ? state.inLines : state.outLines;
+        const pre = target === "in" ? els.logIn : els.logOut;
+        arr.push(line);
+        pre.textContent = arr.join("\n");
+        pre.scrollTop = pre.scrollHeight;
+      }
+
+      function send(bytes, extra, quiet) {
+        if (!state.output) {
+          if (!quiet) {
+            logLine("out", bytes, extra ? extra + "  [NOT SENT: no MIDI output selected]" : "[NOT SENT: no MIDI output selected]");
+          }
+          return false;
+        }
+        try {
+          state.output.send(bytes);
+          if (!quiet) logLine("out", bytes, extra || "");
+          return true;
+        } catch (err) {
+          logLine("out", bytes, "[SEND FAILED: " + (err && err.message ? err.message : String(err)) + "]");
+          return false;
+        }
+      }
+
+      function isNoteOn(bytes) {
+        return (bytes[0] & 0xF0) === 0x90 && bytes.length > 2 && bytes[2] > 0;
+      }
+
+      function isNoteOff(bytes) {
+        const type = bytes[0] & 0xF0;
+        return type === 0x80 || (type === 0x90 && bytes.length > 2 && bytes[2] === 0);
+      }
+
+      function isSustain(bytes) {
+        return (bytes[0] & 0xF0) === 0xB0 && bytes[1] === 64;
+      }
+
+      function allowedNote() {
+        const n = Number(els.allowedNote.value);
+        if (!Number.isFinite(n)) return 60;
+        return Math.max(0, Math.min(127, Math.round(n)));
+      }
+
+      function onIncoming(event) {
+        const bytes = Array.from(event.data || []);
+        if (!bytes.length) return;
+        logLine("in", bytes);
+
+        if (!state.filterMode) return;
+
+        if (isSustain(bytes)) {
+          send(bytes, "[Filter Mode: forwarded sustain]");
+          return;
+        }
+
+        const note = bytes.length > 1 ? bytes[1] : -1;
+        if (isNoteOn(bytes)) {
+          if (note === allowedNote()) {
+            state.forwardedNotes.add(note);
+            send(bytes, "[Filter Mode: allowed note forwarded]");
+          } else {
+            logLine("out", bytes, "[Filter Mode: blocked Note On, not sent]");
+          }
+          return;
+        }
+
+        if (isNoteOff(bytes)) {
+          if (state.forwardedNotes.has(note)) {
+            state.forwardedNotes.delete(note);
+            send(bytes, "[Filter Mode: matching Note Off forwarded]");
+          } else {
+            logLine("out", bytes, "[Filter Mode: blocked Note Off, not sent]");
+          }
+        }
+      }
+
+      async function connect() {
+        if (!navigator.requestMIDIAccess) {
+          setStatus("err", "Web MIDI is not supported in this browser");
+          return;
+        }
+        setStatus("pending", "Requesting MIDI access…");
+        try {
+          state.access = await navigator.requestMIDIAccess({ sysex: false });
+          state.access.onstatechange = refreshDevices;
+          refreshDevices();
+          if (!state.input && !state.output) {
+            setStatus("warn", "MIDI access granted, but no devices were found");
+          }
+        } catch (err) {
+          setStatus("err", "MIDI permission denied or failed");
+        }
+      }
+
+      function playMiddleC() {
+        send([0x90, 60, 100], "[Play Middle C Note On]");
+        window.setTimeout(function () {
+          send([0x80, 60, 0], "[Play Middle C Note Off]");
+        }, 500);
+      }
+
+      function allNotesOff() {
+        for (var ch = 0; ch < 16; ch++) {
+          send([0xB0 + ch, 123, 0], "[All Notes Off channel " + (ch + 1) + "]");
+        }
+      }
+
+      function toggleFilter() {
+        state.filterMode = !state.filterMode;
+        if (!state.filterMode) state.forwardedNotes.clear();
+        els.filter.setAttribute("aria-pressed", String(state.filterMode));
+        els.filter.textContent = state.filterMode ? "Disable Filter Mode" : "Enable Filter Mode";
+      }
+
+      function pianoKeyToMidi(key) {
+        const n = Math.round(Number(key));
+        if (!Number.isFinite(n) || n < 1 || n > 88) return null;
+        return n + 20;
+      }
+
+      function pushTimed(list, time, type, midi, bar) {
+        if (typeof midi !== "number" || midi < 0 || midi > 127) return;
+        list.push({ time: Math.max(0, time), type: type, midi: midi, bar: bar || 0 });
+      }
+
+      function buildScheduleFromSemantic(piece) {
+        const semantic = piece.semantic;
+        if (!semantic || !semantic.measures || !semantic.measures.length) return null;
+        const bpm = (semantic.metadata && semantic.metadata.tempoBpm) || piece.tempo || 120;
+        const division = semantic.division || 480;
+        const msPerTick = (60000 / bpm) / division;
+        const events = [];
+        semantic.measures.forEach(function (measure) {
+          (measure.events || []).forEach(function (ev) {
+            if (ev.type !== "chord" || !ev.notes) return;
+            const start = (ev.tick || 0) * msPerTick;
+            const end = start + (ev.durationTicks || 0) * msPerTick;
+            ev.notes.forEach(function (note) {
+              const fromPrev = note.tie && note.tie.fromPrevious;
+              const toNext = note.tie && note.tie.toNext;
+              if (!fromPrev) pushTimed(events, start, "on", note.midi, measure.number);
+              if (!toNext) pushTimed(events, end, "off", note.midi, measure.number);
+            });
+          });
+        });
+        if (!events.length) return null;
+        events.sort(function (a, b) {
+          if (a.time !== b.time) return a.time - b.time;
+          if (a.type === b.type) return a.midi - b.midi;
+          return a.type === "off" ? -1 : 1;
+        });
+        return { events: events, bpm: bpm, noteOns: events.filter(function (e) { return e.type === "on"; }).length };
+      }
+
+      function buildScheduleFromBars(piece) {
+        const bpm = piece.tempo || 120;
+        const msPerBeat = 60000 / bpm;
+        const events = [];
+        let t = 0;
+        (piece.bars || []).forEach(function (bar) {
+          (bar.events || []).forEach(function (ev) {
+            const width = (ev.w || 1) * msPerBeat;
+            if (!ev.rest) {
+              (ev.L || []).forEach(function (key) {
+                const midi = pianoKeyToMidi(key);
+                pushTimed(events, t, "on", midi, bar.n);
+                pushTimed(events, t + (ev.Ld || ev.w || 1) * msPerBeat, "off", midi, bar.n);
+              });
+              (ev.R || []).forEach(function (key) {
+                const midi = pianoKeyToMidi(key);
+                pushTimed(events, t, "on", midi, bar.n);
+                pushTimed(events, t + (ev.Rd || ev.w || 1) * msPerBeat, "off", midi, bar.n);
+              });
+            }
+            t += width;
+          });
+        });
+        events.sort(function (a, b) {
+          if (a.time !== b.time) return a.time - b.time;
+          if (a.type === b.type) return a.midi - b.midi;
+          return a.type === "off" ? -1 : 1;
+        });
+        return { events: events, bpm: bpm, noteOns: events.filter(function (e) { return e.type === "on"; }).length };
+      }
+
+      function buildSchedule(piece) {
+        return buildScheduleFromSemantic(piece) || buildScheduleFromBars(piece);
+      }
+
+      async function loadPiece(src) {
+        if (pieceCache[src]) return pieceCache[src];
+        const res = await fetch(encodeURI(src));
+        if (!res.ok) throw new Error("Could not load " + src + " (" + res.status + ")");
+        const piece = await res.json();
+        pieceCache[src] = piece;
+        return piece;
+      }
+
+      function silencePlaybackNotes() {
+        state.playback.sounding.forEach(function (_count, midi) {
+          send([0x80, midi, 0], "", true);
+        });
+        state.playback.sounding.clear();
+        if (state.output) {
+          for (var ch = 0; ch < 16; ch++) {
+            send([0xB0 + ch, 123, 0], "", true);
+          }
+        }
+      }
+
+      function stopPiecePlayback(reason) {
+        if (state.playback.raf) {
+          window.cancelAnimationFrame(state.playback.raf);
+          state.playback.raf = 0;
+        }
+        const wasPlaying = state.playback.playing;
+        state.playback.playing = false;
+        state.playback.index = 0;
+        silencePlaybackNotes();
+        updatePlaybackButtons();
+        if (wasPlaying) {
+          const label = state.playback.label || "piece";
+          setPlayStatus(reason === "finished" ? "Finished " + label : "Stopped");
+          logText("out", "[Playback] " + (reason === "finished" ? "finished" : "stopped") + " " + label);
+        } else {
+          setPlayStatus("Stopped");
+        }
+      }
+
+      function tickPlayback() {
+        if (!state.playback.playing) return;
+        const elapsed = performance.now() - state.playback.startAt;
+        const events = state.playback.events;
+        while (state.playback.index < events.length && events[state.playback.index].time <= elapsed + 2) {
+          const ev = events[state.playback.index++];
+          if (ev.type === "on") {
+            const held = (state.playback.sounding.get(ev.midi) || 0) + 1;
+            state.playback.sounding.set(ev.midi, held);
+            if (held === 1) send([0x90, ev.midi, 100], "", true);
+          } else {
+            const held = (state.playback.sounding.get(ev.midi) || 0) - 1;
+            if (held <= 0) {
+              state.playback.sounding.delete(ev.midi);
+              send([0x80, ev.midi, 0], "", true);
+            } else {
+              state.playback.sounding.set(ev.midi, held);
+            }
+          }
+          if (ev.bar && ev.bar !== state.playback.lastBar) {
+            state.playback.lastBar = ev.bar;
+            setPlayStatus("Playing " + state.playback.label + " · bar " + ev.bar);
+          }
+        }
+        if (state.playback.index >= events.length) {
+          stopPiecePlayback("finished");
+          return;
+        }
+        state.playback.raf = window.requestAnimationFrame(tickPlayback);
+      }
+
+      async function playSelectedPiece() {
+        if (!state.output) {
+          setPlayStatus("Select a MIDI output first");
+          return;
+        }
+        if (state.playback.playing || state.playback.loading) return;
+        const meta = PIECES.find(function (p) { return p.id === els.pieceSelect.value; }) || PIECES[0];
+        state.playback.loading = true;
+        els.playPiece.disabled = true;
+        setPlayStatus("Loading " + meta.label + "…");
+        try {
+          const piece = await loadPiece(meta.src);
+          const schedule = buildSchedule(piece);
+          if (!schedule || !schedule.events.length) {
+            setPlayStatus("No playable notes in " + meta.label);
+            return;
+          }
+          state.playback.label = meta.label;
+          state.playback.events = schedule.events;
+          state.playback.index = 0;
+          state.playback.lastBar = 0;
+          state.playback.startAt = performance.now();
+          state.playback.playing = true;
+          updatePlaybackButtons();
+          setPlayStatus("Playing " + meta.label);
+          logText("out", "[Playback] started " + meta.label + "  tempo=" + schedule.bpm + "  noteOns=" + schedule.noteOns);
+          tickPlayback();
+        } catch (err) {
+          setPlayStatus("Could not load piece");
+          logText("out", "[Playback] load failed: " + (err && err.message ? err.message : String(err)));
+        } finally {
+          state.playback.loading = false;
+          updatePlaybackButtons();
+        }
+      }
+
+      function fillPieceSelect() {
+        els.pieceSelect.innerHTML = "";
+        PIECES.forEach(function (piece) {
+          const opt = document.createElement("option");
+          opt.value = piece.id;
+          opt.textContent = piece.label;
+          els.pieceSelect.appendChild(opt);
+        });
+        els.pieceSelect.value = "ode_to_joy_beethoven";
+      }
+
+      els.connect.addEventListener("click", connect);
+      els.midiIn.addEventListener("change", function () {
+        if (!state.access) return;
+        bindInput(state.access.inputs.get(els.midiIn.value) || null);
+      });
+      els.midiOut.addEventListener("change", function () {
+        if (!state.access) return;
+        bindOutput(state.access.outputs.get(els.midiOut.value) || null);
+      });
+      els.middleC.addEventListener("click", playMiddleC);
+      els.localOff.addEventListener("click", function () {
+        send([0xB0, 122, 0], "[Local Control OFF — piano may ignore this]");
+      });
+      els.localOn.addEventListener("click", function () {
+        send([0xB0, 122, 127], "[Local Control ON — piano may ignore this]");
+      });
+      els.allOff.addEventListener("click", allNotesOff);
+      els.sustainOn.addEventListener("click", function () {
+        send([0xB0, 64, 127], "[Sustain ON]");
+      });
+      els.sustainOff.addEventListener("click", function () {
+        send([0xB0, 64, 0], "[Sustain OFF]");
+      });
+      els.filter.addEventListener("click", toggleFilter);
+      els.allowedNote.addEventListener("input", function () {
+        els.allowedNoteName.textContent = noteName(allowedNote());
+      });
+      els.playPiece.addEventListener("click", playSelectedPiece);
+      els.stopPiece.addEventListener("click", function () {
+        stopPiecePlayback("stopped");
+      });
+      els.clear.addEventListener("click", function () {
+        state.inLines = [];
+        state.outLines = [];
+        els.logIn.textContent = "Logs cleared.";
+        els.logOut.textContent = "Logs cleared.";
+      });
+
+      fillPieceSelect();
+    })();
+  </script>
+</body>
+</html>
