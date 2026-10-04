@@ -51,9 +51,11 @@
     practiceAdvanceTimer: null,
     loop: null,
     loopBarCount: 1,
+    selection: null,
     homePianoOnRender: true,
     lastPhraseScrollIndex: null,
     lastPhraseScrollBar: null,
+    wakeLock: null,
   };
 
   const KEY_NUMBERS_STORE = "clair-de-lune.show-key-numbers";
@@ -589,12 +591,46 @@
     return cur ? cur.barNum : 1;
   }
 
+  function selectionBarNum() {
+    if (!State.selection) return null;
+    if (State.selection.type === "bar") return State.selection.barNum;
+    const ev = State.flatEvents[State.selection.index];
+    return ev ? ev.barNum : null;
+  }
+
+  function selectionStepEvent() {
+    if (!State.selection || State.selection.type !== "step") return null;
+    return State.flatEvents[State.selection.index] || null;
+  }
+
+  function isStepSelected(index) {
+    return !!(State.selection && State.selection.type === "step" && State.selection.index === index);
+  }
+
+  function isBarSelected(barNum) {
+    return !!(State.selection && State.selection.type === "bar" && State.selection.barNum === barNum);
+  }
+
   function loopAnchorBar() {
     if (State.loop) {
       const ev = State.flatEvents[State.loop.start];
       if (ev) return ev.barNum;
     }
-    return currentBarNum();
+    return selectionBarNum() || currentBarNum();
+  }
+
+  function loopStartIndex() {
+    if (State.selection) {
+      if (State.selection.type === "step") {
+        const i = State.selection.index;
+        if (i >= 0 && i < State.flatEvents.length) return i;
+      }
+      if (State.selection.type === "bar") {
+        const i = firstIndexForBar(State.selection.barNum);
+        if (i >= 0) return i;
+      }
+    }
+    return firstIndexForBar(currentBarNum());
   }
 
   function maxLoopBarsFrom(startBar) {
@@ -621,31 +657,24 @@
     return -1;
   }
 
-  function barRangeForLoop(startBar, count) {
-    const endBar = Math.min(lastBarNum(), startBar + count - 1);
-    const start = firstIndexForBar(startBar);
-    const end = lastIndexForBar(endBar);
-    return {
-      start: start,
-      end: end,
-      startBar: startBar,
-      endBar: endBar,
-      count: endBar - startBar + 1,
-    };
-  }
-
-  function applyBarLoop(startBar, count) {
+  function applyLoopFromIndex(startIndex, count) {
     if (!State.flatEvents.length) return;
-    const range = barRangeForLoop(startBar, count);
-    if (range.start < 0 || range.end < 0) return;
-    State.loopBarCount = range.count;
-    State.loop = { start: range.start, end: range.end };
-    if (State.currentIndex < range.start || State.currentIndex > range.end) {
+    if (startIndex < 0 || startIndex >= State.flatEvents.length) return;
+    const startEv = State.flatEvents[startIndex];
+    const startBar = startEv.barNum;
+    const max = maxLoopBarsFrom(startBar);
+    const n = Math.max(1, Math.min(max, count || 1));
+    const endBar = startBar + n - 1;
+    const end = lastIndexForBar(endBar);
+    if (end < startIndex) return;
+    State.loopBarCount = n;
+    State.loop = { start: startIndex, end: end };
+    if (State.currentIndex < startIndex || State.currentIndex > end) {
       if (State.practiceAdvanceTimer !== null) {
         clearTimeout(State.practiceAdvanceTimer);
         State.practiceAdvanceTimer = null;
       }
-      State.currentIndex = range.start;
+      State.currentIndex = startIndex;
       State.playedKeys.clear();
     }
     renderUI();
@@ -664,8 +693,26 @@
       if (a === b) return "Looping bar " + a;
       return "Looping bars " + a + "–" + b;
     }
+    if (State.selection && State.selection.type === "bar") {
+      return "Bar " + State.selection.barNum + " selected";
+    }
+    const selected = selectionStepEvent();
+    if (selected) {
+      return "Bar " + selected.barNum + " · step " + selected.eventNum + " selected";
+    }
     if (!rows.length) return "No playable steps";
     return rows.length + (rows.length === 1 ? " step" : " steps");
+  }
+
+  function loopActionLabel() {
+    if (State.selection && State.selection.type === "bar") {
+      return "Loop from bar " + State.selection.barNum;
+    }
+    const selected = selectionStepEvent();
+    if (selected) {
+      return "Loop from bar " + selected.barNum + ", step " + selected.eventNum;
+    }
+    return "Loop from bar " + currentBarNum();
   }
 
   function updatePhraseToolbar(rows) {
@@ -674,7 +721,12 @@
     const max = maxLoopBarsFrom(loopAnchorBar());
     if (els.btnLoopAgain) els.btnLoopAgain.disabled = !looping;
     if (els.btnLoopClear) els.btnLoopClear.disabled = !looping;
-    if (els.btnLoopThese) els.btnLoopThese.disabled = State.flatEvents.length === 0;
+    if (els.btnLoopThese) {
+      els.btnLoopThese.disabled = State.flatEvents.length === 0;
+      const label = loopActionLabel();
+      els.btnLoopThese.title = label;
+      els.btnLoopThese.setAttribute("aria-label", label);
+    }
     if (els.btnLoopMinus) els.btnLoopMinus.disabled = count <= 1;
     if (els.btnLoopPlus) els.btnLoopPlus.disabled = count >= max;
     if (els.loopBarCount) els.loopBarCount.textContent = loopBarCountLabel(count);
@@ -706,6 +758,118 @@
     els.pianoScroll.scrollLeft = x;
     lastPianoScrollX = els.pianoScroll.scrollLeft;
     syncingPhraseScroll = false;
+  }
+
+  function phraseBarBreakHtml(barNum, tabIndex) {
+    const selected = isBarSelected(barNum);
+    return (
+      '<div class="phrase-bar-break' + (selected ? " is-selected" : "") + '" ' +
+        'role="option" tabindex="' + tabIndex + '" ' +
+        'id="phrase-bar-' + barNum + '" ' +
+        'data-bar="' + barNum + '" ' +
+        'aria-label="Bar ' + barNum + '" ' +
+        'aria-selected="' + (selected ? "true" : "false") + '">' +
+        '<span class="phrase-bar-break-label">Bar ' + barNum + "</span>" +
+      "</div>"
+    );
+  }
+
+  function optionTabIndex(isSelected, assigned) {
+    if (State.selection) return isSelected ? 0 : -1;
+    if (!assigned.value) {
+      assigned.value = true;
+      return 0;
+    }
+    return -1;
+  }
+
+  function focusedPhraseTarget() {
+    const active = document.activeElement;
+    if (!active || !els.phraseInner || !els.phraseInner.contains(active)) return null;
+    if (active.classList.contains("phrase-bar-break")) {
+      return { type: "bar", barNum: Number(active.getAttribute("data-bar")) };
+    }
+    if (active.classList.contains("phrase-row")) {
+      return { type: "step", index: Number(active.getAttribute("data-event-index")) };
+    }
+    return null;
+  }
+
+  function restorePhraseFocus(target) {
+    if (!target || !els.phraseInner) return;
+    const el = target.type === "bar"
+      ? els.phraseInner.querySelector('.phrase-bar-break[data-bar="' + target.barNum + '"]')
+      : els.phraseInner.querySelector('.phrase-row[data-event-index="' + target.index + '"]');
+    if (el) el.focus({ preventScroll: true });
+    return el;
+  }
+
+  function scrollPhraseOptionVertically(el) {
+    const scroller = els.phraseScroll;
+    if (!scroller || !el) return;
+    const sRect = scroller.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    const pad = 8;
+    if (eRect.top < sRect.top + pad) {
+      scroller.scrollTop -= sRect.top + pad - eRect.top;
+    } else if (eRect.bottom > sRect.bottom - pad) {
+      scroller.scrollTop += eRect.bottom - (sRect.bottom - pad);
+    }
+  }
+
+  function phraseOptions() {
+    if (!els.phraseInner) return [];
+    return Array.prototype.slice.call(
+      els.phraseInner.querySelectorAll('.phrase-row[role="option"], .phrase-bar-break[role="option"]')
+    );
+  }
+
+  function setSelection(next, options) {
+    const prev = State.selection;
+    const same = prev && next && prev.type === next.type &&
+      (next.type === "step" ? prev.index === next.index : prev.barNum === next.barNum);
+    if (options && options.toggle && same) {
+      State.selection = null;
+    } else {
+      State.selection = next;
+    }
+    renderPhrasePanel();
+  }
+
+  function selectPhraseElement(el, options) {
+    if (!el || !els.phraseInner || !els.phraseInner.contains(el)) return;
+    let target = null;
+    if (el.classList.contains("phrase-bar-break")) {
+      const barNum = Number(el.getAttribute("data-bar"));
+      if (!Number.isFinite(barNum)) return;
+      target = { type: "bar", barNum: barNum };
+      setSelection(target, options);
+    } else if (el.classList.contains("phrase-row")) {
+      const index = Number(el.getAttribute("data-event-index"));
+      if (!Number.isFinite(index)) return;
+      target = { type: "step", index: index };
+      setSelection(target, options);
+    }
+    if (target) {
+      const focused = restorePhraseFocus(target);
+      scrollPhraseOptionVertically(focused);
+    }
+  }
+
+  function movePhraseSelection(delta) {
+    const options = phraseOptions();
+    if (!options.length) return;
+    const active = document.activeElement;
+    let from = options.indexOf(active);
+    if (from < 0) {
+      const selected = options.findIndex(function (el) {
+        return el.getAttribute("aria-selected") === "true";
+      });
+      from = selected >= 0 ? selected : 0;
+    }
+    const next = options[Math.max(0, Math.min(options.length - 1, from + delta))];
+    if (!next) return;
+    selectPhraseElement(next);
   }
 
   function appendPhraseKeyMarks(row, rowIndex, rows, handClass, keys) {
@@ -745,10 +909,13 @@
     if (!rows.length) {
       const empty = "No playable steps";
       els.phraseInner.innerHTML = '<div class="phrase-empty">' + empty + "</div>";
+      els.phraseInner.removeAttribute("aria-activedescendant");
       syncPhraseScrollFromPiano();
       return;
     }
 
+    const restore = focusedPhraseTarget();
+    const tabAssigned = { value: false };
     let html = "";
     rows.forEach(function (row, rowIndex) {
       let stateClass = "is-future";
@@ -766,28 +933,51 @@
       const isBarEnd = nextBarNum !== null && nextBarNum !== barNum;
       if (isBarStart) stateClass += " is-bar-start";
       if (isBarEnd) stateClass += " is-bar-end";
+      if (isStepSelected(row.index)) stateClass += " is-selected";
+      if (isBarSelected(barNum)) stateClass += " is-in-selected-bar";
+
+      if (rowIndex === 0) {
+        html += phraseBarBreakHtml(barNum, optionTabIndex(isBarSelected(barNum), tabAssigned));
+      }
 
       html +=
-        '<div class="phrase-row ' + stateClass + '" data-event-index="' + row.index + '" data-bar="' + barNum + '">';
+        '<div class="phrase-row ' + stateClass + '" role="option" tabindex="' + optionTabIndex(isStepSelected(row.index), tabAssigned) + '" ' +
+          'id="phrase-step-' + row.index + '" ' +
+          'data-event-index="' + row.index + '" data-bar="' + barNum + '" ' +
+          'aria-label="Bar ' + barNum + ', step ' + row.event.eventNum + '" ' +
+          'aria-selected="' + (isStepSelected(row.index) ? "true" : "false") + '">';
       html += appendPhraseKeyMarks(row, rowIndex, rows, "is-lh", row.event.keysL);
       html += appendPhraseKeyMarks(row, rowIndex, rows, "is-rh", row.event.keysR);
       html += "</div>";
 
       if (isBarEnd) {
-        html +=
-          '<div class="phrase-bar-break" role="separator" aria-label="Bar ' + nextBarNum + '" data-bar="' + nextBarNum + '">' +
-            '<span class="phrase-bar-break-label">Bar ' + nextBarNum + "</span>" +
-          "</div>";
+        html += phraseBarBreakHtml(nextBarNum, optionTabIndex(isBarSelected(nextBarNum), tabAssigned));
       }
     });
 
+    const selectedId = State.selection
+      ? (State.selection.type === "bar"
+        ? "phrase-bar-" + State.selection.barNum
+        : "phrase-step-" + State.selection.index)
+      : "";
+    if (selectedId) {
+      els.phraseInner.setAttribute("aria-activedescendant", selectedId);
+    } else {
+      els.phraseInner.removeAttribute("aria-activedescendant");
+    }
+
     els.phraseInner.innerHTML = html;
+    if (!els.phraseInner.querySelector('[tabindex="0"]')) {
+      const first = els.phraseInner.querySelector('[role="option"]');
+      if (first) first.setAttribute("tabindex", "0");
+    }
+    restorePhraseFocus(restore);
     syncPhraseScrollFromPiano();
     scrollPhraseNowRowIntoView();
   }
 
   function loopThese() {
-    applyBarLoop(currentBarNum(), clampLoopBarCount());
+    applyLoopFromIndex(loopStartIndex(), clampLoopBarCount());
   }
 
   function adjustLoopBars(delta) {
@@ -796,7 +986,7 @@
     const count = Math.max(1, Math.min(max, next));
     State.loopBarCount = count;
     if (State.loop) {
-      applyBarLoop(loopAnchorBar(), count);
+      applyLoopFromIndex(State.loop.start, count);
       return;
     }
     updatePhraseToolbar(collectPhraseRows().rows);
@@ -981,6 +1171,7 @@
     State.currentIndex = 0;
     State.playedKeys.clear();
     State.loop = null;
+    State.selection = null;
     State.homePianoOnRender = true;
     State.lastPhraseScrollIndex = null;
     State.lastPhraseScrollBar = null;
@@ -1036,6 +1227,7 @@
 
   function handleKeyPress(key) {
     if (key < 1 || key > 88) return;
+    WakeLock.request();
     State.currentlyPressedKeys.add(key);
 
     const cur = currentFlatEvent();
@@ -1082,6 +1274,29 @@
       el.classList.toggle("is-pressed", State.currentlyPressedKeys.has(k));
     });
   }
+
+  const WakeLock = {
+    async request() {
+      if (!("wakeLock" in navigator) || State.wakeLock || document.visibilityState !== "visible") {
+        return;
+      }
+
+      try {
+        State.wakeLock = await navigator.wakeLock.request("screen");
+        State.wakeLock.addEventListener("release", function () {
+          State.wakeLock = null;
+        });
+      } catch (err) {
+        State.wakeLock = null;
+      }
+    },
+
+    handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        this.request();
+      }
+    },
+  };
 
   function renderUI() {
     updateHeaderInfo();
@@ -1198,6 +1413,8 @@
   };
 
   function setupListeners() {
+    document.addEventListener("visibilitychange", WakeLock.handleVisibilityChange.bind(WakeLock));
+
     window.addEventListener("resize", function () {
       renderLocalStage();
       renderPhrasePanel();
@@ -1210,6 +1427,39 @@
     }
     if (els.phraseScroll) {
       els.phraseScroll.addEventListener("scroll", syncPianoScrollFromPhrase);
+    }
+    if (els.phraseInner) {
+      els.phraseInner.addEventListener("click", function (e) {
+        const option = e.target.closest('[role="option"]');
+        if (!option || !els.phraseInner.contains(option)) return;
+        selectPhraseElement(option, { toggle: true });
+      });
+      els.phraseInner.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          movePhraseSelection(1);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          movePhraseSelection(-1);
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          const options = phraseOptions();
+          if (options[0]) selectPhraseElement(options[0]);
+        } else if (e.key === "End") {
+          e.preventDefault();
+          const options = phraseOptions();
+          if (options.length) selectPhraseElement(options[options.length - 1]);
+        } else if (e.key === "Enter" || e.key === " ") {
+          const option = e.target.closest('[role="option"]');
+          if (!option || !els.phraseInner.contains(option)) return;
+          e.preventDefault();
+          selectPhraseElement(option, { toggle: true });
+        } else if (e.key === "Escape" && State.selection) {
+          e.preventDefault();
+          State.selection = null;
+          renderPhrasePanel();
+        }
+      });
     }
 
     if (els.btnLoopThese) {
@@ -1233,13 +1483,18 @@
     }
 
     if (els.btnPrev) els.btnPrev.addEventListener("click", function () {
+      WakeLock.request();
       advanceEvent(-1);
     });
     if (els.btnNext) els.btnNext.addEventListener("click", function () {
+      WakeLock.request();
       advanceEvent(1);
     });
     if (els.btnReset) {
-      els.btnReset.addEventListener("click", restartPractice);
+      els.btnReset.addEventListener("click", function () {
+        WakeLock.request();
+        restartPractice();
+      });
     }
 
     if (els.midiSelect) {
@@ -1256,16 +1511,19 @@
 
     document.addEventListener("keydown", function (e) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+      if (e.target.closest("input, select, button, textarea, .phrase-inner")) return;
 
       if (e.key === " " || e.key === "ArrowRight" || e.key === "n" || e.key === "N") {
         e.preventDefault();
+        WakeLock.request();
         advanceEvent(1);
       } else if (e.key === "ArrowLeft" || e.key === "Backspace" || e.key === "p" || e.key === "P") {
         e.preventDefault();
+        WakeLock.request();
         advanceEvent(-1);
       } else if (e.key === "r" || e.key === "R") {
         e.preventDefault();
+        WakeLock.request();
         restartPractice();
       }
     });
@@ -1274,6 +1532,7 @@
       els.localPiano.addEventListener("pointerdown", function (e) {
         const keyEl = e.target.closest(".lpk[data-key]");
         if (!keyEl) return;
+        WakeLock.request();
         const key = Number(keyEl.getAttribute("data-key"));
         handleKeyPress(key);
       });
